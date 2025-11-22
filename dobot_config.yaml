@@ -1,0 +1,47 @@
+# Dobot CR Controller Configuration
+# This is the default configuration file. Copy to dobot_config.local.yaml for local overrides.
+
+robot:
+  # IP address of your Dobot CR robot
+  ip: "10.11.6.69"
+
+  # Control port (default: 29999)
+  control_port: 29999
+
+  # Feedback port (default: 30004)
+  feedback_port: 30004
+
+  # Connection timeout in seconds
+  timeout: 5
+
+display:
+  # Use colored output
+  color: true
+
+  # Output format: table, json, yaml
+  format: "table"
+
+  # Decimal precision for coordinates
+  precision: 2
+
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+
+  # Log file path (optional, leave empty for no file logging)
+  file: ""
+
+jog:
+  # Default jog distance for linear movements (mm)
+  default_distance_mm: 10
+
+  # Default jog distance for rotations (degrees)
+  default_rotation_deg: 5
+
+  # Jog movement speed (percentage 1-100)
+  speed_percent: 50
+
+  # Default coordinate mode: "user" or "tool"
+  # user = world/base coordinates (X/Y/Z absolute)
+  # tool = relative to tool/gripper orientation
+  coordinate_mode: "user"
