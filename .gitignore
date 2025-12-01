@@ -59,3 +59,4 @@ dobot_config.local.yaml
 
 # Logs
 *.log
+environment.yaml
