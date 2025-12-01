@@ -1,0 +1,39 @@
+# Dobot CR ROS2 - Docker Compose
+#
+# Usage:
+#   docker compose build              # Build the image
+#   docker compose run dobot bash     # Interactive shell
+#   docker compose up dobot-driver    # Start the driver (set ROBOT_IP first)
+
+services:
+  # Base service with common settings
+  dobot:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    network_mode: host  # Required to reach robot on local network
+    environment:
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+    volumes:
+      # Mount config for persistence
+      - ./dobot-ros:/dobot-ros:ro
+      - ./dobot_ros_config.yaml:/root/.config/dobot/dobot_ros_config.yaml:ro
+    stdin_open: true
+    tty: true
+
+  # Driver service - connects to robot and exposes ROS2 services
+  dobot-driver:
+    extends: dobot
+    environment:
+      - IP_address=${ROBOT_IP:-192.168.5.1}
+      - DOBOT_TYPE=${ROBOT_TYPE:-cr5}
+    command: >
+      bash -c "ros2 launch cr_robot_ros2 dobot_bringup_ros2.launch.py"
+
+  # CLI service - for running dobot-ros commands
+  dobot-cli:
+    extends: dobot
+    command: dobot-ros
+    depends_on:
+      - dobot-driver

@@ -51,6 +51,11 @@ dmypy.json
 
 # Local config (user-specific)
 dobot_config.local.yaml
+.env
+
+# History files
+.dobot_history
+.dobot_ros_history
 
 # Logs
 *.log

@@ -1,0 +1,26 @@
+# Dobot ROS2 CLI Configuration
+
+robot:
+  # Robot IP address (used by dobot_bringup_v4)
+  ip: "192.168.1.6"
+
+# ROS2 settings
+ros:
+  # Namespace for dobot_bringup_v4 services
+  namespace: ""
+  # Service timeout in seconds
+  service_timeout: 5.0
+
+display:
+  color: true
+  format: "table"  # table, json, yaml
+  precision: 2
+
+jog:
+  default_distance_mm: 10
+  default_rotation_deg: 5
+  speed_percent: 50
+  coordinate_mode: "user"  # user or tool
+
+logging:
+  level: "INFO"

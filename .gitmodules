@@ -1,0 +1,9 @@
+[submodule "TCP-IP-Python-V4"]
+	path = TCP-IP-Python-V4
+	url = https://github.com/Dobot-Arm/TCP-IP-Python-V4.git
+[submodule "DOBOT_6Axis_ROS2_V4"]
+	path = DOBOT_6Axis_ROS2_V4
+	url = https://github.com/Dobot-Arm/DOBOT_6Axis_ROS2_V4.git
+[submodule "TCP-IP-ROS-6Axis"]
+	path = TCP-IP-ROS-6Axis
+	url = https://github.com/Dobot-Arm/TCP-IP-ROS-6Axis.git
