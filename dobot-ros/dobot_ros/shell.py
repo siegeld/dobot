@@ -242,7 +242,6 @@ class DobotShell:
 
         try:
             import random
-            import time
 
             start_pos = self.client.get_joint_angles()
             self.console.print(f"[bold blue]ℹ[/bold blue] Starting dance from current position...")
@@ -253,11 +252,10 @@ class DobotShell:
                 target = [start_pos[j] + offsets[j] for j in range(6)]
 
                 self.console.print(f"[bold cyan]→[/bold cyan] Dance move {i+1}/{count}...")
-                self.client.move_joints(target)
-                time.sleep(0.1)
+                self.client.move_joints(target, wait=True)
 
             self.console.print(f"[bold blue]→[/bold blue] Returning to start position...")
-            self.client.move_joints(start_pos)
+            self.client.move_joints(start_pos, wait=True)
             self.console.print(f"[bold green]✓[/bold green] Dance complete!")
 
         except Exception as e:

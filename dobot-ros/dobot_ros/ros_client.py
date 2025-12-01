@@ -205,12 +205,14 @@ class DobotRosClient(Node):
         cartesian = self.get_cartesian_pose()
         return Position(joint=joint, cartesian=cartesian)
 
-    def move_joints(self, angles: List[float]) -> int:
+    def move_joints(self, angles: List[float], wait: bool = False, tolerance: float = 0.5) -> int:
         """
         Move to absolute joint angles.
 
         Args:
             angles: List of 6 joint angles in degrees
+            wait: If True, block until motion completes
+            tolerance: Position tolerance in degrees for wait mode
         """
         if len(angles) != 6:
             raise ValueError("Must provide exactly 6 joint angles")
@@ -226,7 +228,35 @@ class DobotRosClient(Node):
         request.param_value = []
 
         response = self._call_service(self._movj_client, request)
+
+        if wait:
+            self.wait_for_motion(angles, tolerance)
+
         return response.res
+
+    def wait_for_motion(self, target: List[float], tolerance: float = 0.5, timeout: float = 30.0) -> bool:
+        """
+        Wait for robot to reach target position.
+
+        Args:
+            target: Target joint angles in degrees
+            tolerance: Position tolerance in degrees
+            timeout: Maximum wait time in seconds
+
+        Returns:
+            True if target reached, False if timeout
+        """
+        import time
+        start_time = time.time()
+
+        while time.time() - start_time < timeout:
+            current = self.get_joint_angles()
+            max_error = max(abs(current[i] - target[i]) for i in range(6))
+            if max_error <= tolerance:
+                return True
+            time.sleep(0.1)
+
+        return False
 
     def jog_joint(self, joint: int, offset: float) -> int:
         """
