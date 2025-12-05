@@ -16,14 +16,17 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /ros2_ws
 RUN mkdir -p src
 
-# Copy Dobot ROS2 packages
+# Stage 1: Build stable Dobot packages (cached - these rarely change)
 COPY DOBOT_6Axis_ROS2_V4/dobot_msgs_v4 src/dobot_msgs_v4
 COPY DOBOT_6Axis_ROS2_V4/dobot_bringup_v4 src/dobot_bringup_v4
-COPY dobot_actions src/dobot_actions
-
-# Build the workspace
 RUN . /opt/ros/jazzy/setup.sh && \
-    colcon build --symlink-install
+    colcon build --symlink-install --packages-select dobot_msgs_v4 cr_robot_ros2
+
+# Stage 2: Build dobot_actions (changes more frequently)
+COPY dobot_actions src/dobot_actions
+RUN . /opt/ros/jazzy/setup.sh && \
+    . /ros2_ws/install/setup.sh && \
+    colcon build --symlink-install --packages-select dobot_actions
 
 # Copy and install the dobot-ros CLI
 COPY dobot-ros /dobot-ros

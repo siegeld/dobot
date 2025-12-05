@@ -12,4 +12,10 @@ def generate_launch_description():
             name='move_joints_server',
             output='screen',
         ),
+        Node(
+            package='dobot_actions',
+            executable='move_cartesian_server.py',
+            name='move_cartesian_server',
+            output='screen',
+        ),
     ])

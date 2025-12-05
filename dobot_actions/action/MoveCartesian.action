@@ -1,0 +1,18 @@
+# Goal: relative cartesian move
+float64 x    # mm
+float64 y    # mm
+float64 z    # mm
+float64 rx   # degrees
+float64 ry   # degrees
+float64 rz   # degrees
+string mode  # "user" or "tool" coordinate frame
+float64 tolerance  # mm, default 1.0
+---
+# Result
+bool success
+string message
+float64[6] final_position  # X,Y,Z,RX,RY,RZ
+---
+# Feedback
+float64[6] current_position
+float64 distance_remaining

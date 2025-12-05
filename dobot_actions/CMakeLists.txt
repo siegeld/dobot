@@ -7,11 +7,13 @@ find_package(rosidl_default_generators REQUIRED)
 # Generate action interfaces
 rosidl_generate_interfaces(${PROJECT_NAME}
   "action/MoveJoints.action"
+  "action/MoveCartesian.action"
 )
 
-# Install Python executable
+# Install Python executables
 install(PROGRAMS
   scripts/move_joints_server.py
+  scripts/move_cartesian_server.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
