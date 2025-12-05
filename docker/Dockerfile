@@ -19,6 +19,7 @@ RUN mkdir -p src
 # Copy Dobot ROS2 packages
 COPY DOBOT_6Axis_ROS2_V4/dobot_msgs_v4 src/dobot_msgs_v4
 COPY DOBOT_6Axis_ROS2_V4/dobot_bringup_v4 src/dobot_bringup_v4
+COPY dobot_actions src/dobot_actions
 
 # Build the workspace
 RUN . /opt/ros/jazzy/setup.sh && \

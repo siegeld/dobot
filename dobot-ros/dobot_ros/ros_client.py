@@ -234,14 +234,25 @@ class DobotRosClient(Node):
 
         return response.res
 
-    def wait_for_motion(self, target: List[float], tolerance: float = 0.5, timeout: float = 30.0) -> bool:
+    def wait_for_motion(
+        self,
+        target: List[float],
+        tolerance: float = 0.5,
+        timeout: float = 30.0,
+        feedback_callback=None,
+    ) -> bool:
         """
         Wait for robot to reach target position.
+
+        Note: The Dobot ROS2 driver doesn't provide ROS2 Actions for motion,
+        so we poll GetAngle until the target is reached. For a proper ROS2
+        action interface, use the dobot_actions/move_joints action server.
 
         Args:
             target: Target joint angles in degrees
             tolerance: Position tolerance in degrees
             timeout: Maximum wait time in seconds
+            feedback_callback: Optional callback(current, max_error) for progress
 
         Returns:
             True if target reached, False if timeout
@@ -252,6 +263,10 @@ class DobotRosClient(Node):
         while time.time() - start_time < timeout:
             current = self.get_joint_angles()
             max_error = max(abs(current[i] - target[i]) for i in range(6))
+
+            if feedback_callback:
+                feedback_callback(current, max_error)
+
             if max_error <= tolerance:
                 return True
             time.sleep(0.1)

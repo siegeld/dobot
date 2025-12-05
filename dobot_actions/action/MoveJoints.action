@@ -1,0 +1,12 @@
+# Goal: target joint angles in degrees
+float64[6] target
+float64 tolerance  # degrees, default 0.5
+---
+# Result
+bool success
+string message
+float64[6] final_position
+---
+# Feedback
+float64[6] current_position
+float64 max_error
