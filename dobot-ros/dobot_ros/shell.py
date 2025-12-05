@@ -45,6 +45,7 @@ class DobotShell:
         self.config = config
         self.console = Console()
         self.debug_mode = False
+        self.sync_mode = config.sync_mode  # From config, can toggle at runtime
 
         # Command completer
         self.completer = WordCompleter(
@@ -55,7 +56,7 @@ class DobotShell:
                 'j1', 'j2', 'j3', 'j4', 'j5', 'j6',
                 'user', 'tool',
                 'enable', 'disable', 'clear', 'stop',
-                'dance', 'status', 'debug',
+                'dance', 'status', 'debug', 'sync',
                 'help', 'exit', 'quit',
             ],
             ignore_case=True,
@@ -104,6 +105,7 @@ class DobotShell:
         table.add_row("clear", "", "Clear robot errors")
         table.add_row("stop", "", "Stop robot motion")
         table.add_row("status", "", "Show connection status")
+        table.add_row("sync", "", "Toggle sync mode (wait for motion)")
         table.add_row("debug", "", "Toggle debug mode")
         table.add_row("help", "?", "Show this help")
         table.add_row("exit", "quit", "Exit the shell")
@@ -190,6 +192,7 @@ class DobotShell:
         table.add_row("ROS2 Services", "Available" if connected else "Not Available")
         table.add_row("Namespace", self.client.namespace or "(none)")
         table.add_row("Jog Mode", self.client.jog_mode.capitalize())
+        table.add_row("Sync Mode", "ON (wait)" if self.sync_mode else "OFF (async)")
         table.add_row("Debug Mode", "ON" if self.debug_mode else "OFF")
 
         try:
@@ -207,6 +210,16 @@ class DobotShell:
         self.console.print(f"Debug mode: {status}")
         if self.debug_mode:
             self.console.print("[yellow]Debug mode will show joint angles and confirm before moves[/yellow]")
+
+    def cmd_sync(self) -> None:
+        """Toggle sync mode."""
+        self.sync_mode = not self.sync_mode
+        status = "[bold green]ON[/bold green]" if self.sync_mode else "[bold red]OFF[/bold red]"
+        self.console.print(f"Sync mode: {status}")
+        if self.sync_mode:
+            self.console.print("[yellow]Commands will wait for motion to complete before returning[/yellow]")
+        else:
+            self.console.print("[yellow]Commands will return immediately (async)[/yellow]")
 
     def cmd_dance(self, args: list) -> None:
         """Random dance motion."""
@@ -302,8 +315,11 @@ class DobotShell:
                         return
 
                 self.console.print(f"[bold blue]→[/bold blue] Jogging all joints...")
-                self.client.move_joints(target)
-                self.console.print("[bold green]✓[/bold green] Move complete")
+                self.client.move_joints(target, wait=self.sync_mode)
+                if self.sync_mode:
+                    self.console.print("[bold green]✓[/bold green] Move complete")
+                else:
+                    self.console.print("[bold green]✓[/bold green] Move command sent")
             except Exception as e:
                 self.console.print(f"[bold red]Error:[/bold red] {e}")
             return
@@ -350,7 +366,7 @@ class DobotShell:
                         return
 
                 self.console.print(f"[bold blue]→[/bold blue] Jogging J{joint_num} by {distance:+.1f}°...")
-                self.client.jog_joint(joint_num, distance)
+                self.client.jog_joint(joint_num, distance, wait=self.sync_mode)
             else:
                 unit = "mm" if axis in ('x', 'y', 'z') else "°"
                 mode_str = self.client.jog_mode.capitalize()
@@ -377,9 +393,12 @@ class DobotShell:
                 )
                 jog_params = {'x': 0, 'y': 0, 'z': 0, 'rx': 0, 'ry': 0, 'rz': 0}
                 jog_params[axis] = distance
-                self.client.jog(**jog_params)
+                self.client.jog(**jog_params, wait=self.sync_mode)
 
-            self.console.print("[bold green]✓[/bold green] Jog command sent")
+            if self.sync_mode:
+                self.console.print("[bold green]✓[/bold green] Move complete")
+            else:
+                self.console.print("[bold green]✓[/bold green] Jog command sent")
 
         except Exception as e:
             self.console.print(f"[bold red]Error:[/bold red] {e}")
@@ -418,6 +437,8 @@ class DobotShell:
             self.cmd_status()
         elif command == 'debug':
             self.cmd_debug()
+        elif command == 'sync':
+            self.cmd_sync()
         elif command == 'dance':
             self.cmd_dance(parts[1:])
         else:

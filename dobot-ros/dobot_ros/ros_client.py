@@ -242,7 +242,7 @@ class DobotRosClient(Node):
         feedback_callback=None,
     ) -> bool:
         """
-        Wait for robot to reach target position.
+        Wait for robot to reach target joint position.
 
         Note: The Dobot ROS2 driver doesn't provide ROS2 Actions for motion,
         so we poll GetAngle until the target is reached. For a proper ROS2
@@ -273,13 +273,64 @@ class DobotRosClient(Node):
 
         return False
 
-    def jog_joint(self, joint: int, offset: float) -> int:
+    def wait_for_cartesian_motion(
+        self,
+        target: List[float],
+        tolerance: float = 1.0,
+        timeout: float = 30.0,
+        feedback_callback=None,
+    ) -> bool:
+        """
+        Wait for robot to reach target cartesian position.
+
+        Args:
+            target: Target cartesian pose [X, Y, Z, RX, RY, RZ]
+            tolerance: Position tolerance in mm (for XYZ)
+            timeout: Maximum wait time in seconds
+            feedback_callback: Optional callback(current, distance) for progress
+
+        Returns:
+            True if target reached, False if timeout
+        """
+        import time
+        import math
+        start_time = time.time()
+
+        while time.time() - start_time < timeout:
+            current = self.get_cartesian_pose()
+            # Distance in XYZ only
+            distance = math.sqrt(
+                (current[0] - target[0])**2 +
+                (current[1] - target[1])**2 +
+                (current[2] - target[2])**2
+            )
+
+            if feedback_callback:
+                feedback_callback(current, distance)
+
+            if distance <= tolerance:
+                return True
+            time.sleep(0.1)
+
+        return False
+
+    def jog_joint(
+        self,
+        joint: int,
+        offset: float,
+        wait: bool = False,
+        tolerance: float = 0.5,
+        timeout: float = 30.0,
+    ) -> int:
         """
         Jog a single joint by offset.
 
         Args:
             joint: Joint number (1-6)
             offset: Angle offset in degrees
+            wait: If True, block until motion completes
+            tolerance: Position tolerance in degrees for wait mode
+            timeout: Maximum wait time in seconds
         """
         if joint < 1 or joint > 6:
             raise ValueError("Joint must be 1-6")
@@ -289,12 +340,15 @@ class DobotRosClient(Node):
         target = list(current)
         target[joint - 1] += offset
 
-        return self.move_joints(target)
+        return self.move_joints(target, wait=wait, tolerance=tolerance)
 
     def jog(
         self,
         x: float = 0, y: float = 0, z: float = 0,
         rx: float = 0, ry: float = 0, rz: float = 0,
+        wait: bool = False,
+        tolerance: float = 1.0,
+        timeout: float = 30.0,
     ) -> int:
         """
         Jog in cartesian space.
@@ -302,7 +356,22 @@ class DobotRosClient(Node):
         Args:
             x, y, z: Linear offsets in mm
             rx, ry, rz: Rotation offsets in degrees
+            wait: If True, block until motion completes
+            tolerance: Position tolerance in mm for wait mode
+            timeout: Maximum wait time in seconds
         """
+        # Get current pose to calculate target for wait mode
+        if wait:
+            current_pose = self.get_cartesian_pose()
+            target = [
+                current_pose[0] + x,
+                current_pose[1] + y,
+                current_pose[2] + z,
+                current_pose[3] + rx,
+                current_pose[4] + ry,
+                current_pose[5] + rz,
+            ]
+
         if self._jog_mode == 'tool':
             request = RelMovLTool.Request()
         else:
@@ -320,6 +389,9 @@ class DobotRosClient(Node):
             response = self._call_service(self._rel_mov_tool_client, request)
         else:
             response = self._call_service(self._rel_mov_user_client, request)
+
+        if wait:
+            self.wait_for_cartesian_motion(target, tolerance, timeout)
 
         return response.res
 

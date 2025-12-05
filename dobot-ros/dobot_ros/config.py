@@ -78,6 +78,12 @@ class Config:
                 'speed_percent': 50,
                 'coordinate_mode': 'user',
             },
+            'motion': {
+                'sync_mode': False,  # True = wait for motion to complete
+                'tolerance_deg': 0.5,
+                'tolerance_mm': 1.0,
+                'timeout': 30.0,
+            },
             'logging': {
                 'level': 'INFO',
             },
@@ -145,6 +151,22 @@ class Config:
     @property
     def jog_coordinate_mode(self) -> str:
         return self.get('jog.coordinate_mode', 'user')
+
+    @property
+    def sync_mode(self) -> bool:
+        return self.get('motion.sync_mode', False)
+
+    @property
+    def motion_tolerance_deg(self) -> float:
+        return self.get('motion.tolerance_deg', 0.5)
+
+    @property
+    def motion_tolerance_mm(self) -> float:
+        return self.get('motion.tolerance_mm', 1.0)
+
+    @property
+    def motion_timeout(self) -> float:
+        return self.get('motion.timeout', 30.0)
 
     @property
     def config_file(self) -> Optional[Path]:

@@ -214,6 +214,7 @@ def config_show(ctx: click.Context) -> None:
     table.add_row("Jog Rotation", f"{config.jog_default_rotation}°")
     table.add_row("Jog Speed", f"{config.jog_speed}%")
     table.add_row("Jog Mode", config.jog_coordinate_mode)
+    table.add_row("Sync Mode", "ON (wait)" if config.sync_mode else "OFF (async)")
 
     console.print(table)
 
@@ -244,6 +245,10 @@ def shell(ctx: click.Context) -> None:
     "--speed", type=int,
     help="Movement speed percentage (1-100)",
 )
+@click.option(
+    "--sync/--async", "sync_mode", default=None,
+    help="Wait for motion to complete (sync) or return immediately (async)",
+)
 @click.pass_context
 def jog(
     ctx: click.Context,
@@ -251,6 +256,7 @@ def jog(
     distance: float,
     mode: Optional[str],
     speed: Optional[int],
+    sync_mode: Optional[bool],
 ) -> None:
     """
     Jog robot by a relative distance.
@@ -266,6 +272,7 @@ def jog(
     config: Config = ctx.obj["config"]
     jog_mode = mode or config.jog_coordinate_mode
     jog_speed = speed or config.jog_speed
+    wait = sync_mode if sync_mode is not None else config.sync_mode
 
     if jog_speed < 1 or jog_speed > 100:
         print_error("Speed must be between 1 and 100")
@@ -278,26 +285,30 @@ def jog(
         client.set_speed_factor(jog_speed)
 
         axis = axis.lower()
+        mode_str = "sync" if wait else "async"
 
         if axis.startswith('j'):
             # Joint jog
             joint_num = int(axis[1])
-            print_info(f"Jogging J{joint_num} by {distance:+.1f}° ({jog_speed}% speed)")
-            client.jog_joint(joint_num, distance)
+            print_info(f"Jogging J{joint_num} by {distance:+.1f}° ({jog_speed}% speed, {mode_str})")
+            client.jog_joint(joint_num, distance, wait=wait)
         else:
             # Cartesian jog
             client.set_jog_mode(jog_mode)
             unit = "mm" if axis in ('x', 'y', 'z') else "°"
             print_info(
                 f"Jogging {axis.upper()} by {distance:+.1f}{unit} "
-                f"({jog_mode} coords, {jog_speed}% speed)"
+                f"({jog_mode} coords, {jog_speed}% speed, {mode_str})"
             )
 
             jog_params = {'x': 0, 'y': 0, 'z': 0, 'rx': 0, 'ry': 0, 'rz': 0}
             jog_params[axis] = distance
-            client.jog(**jog_params)
+            client.jog(**jog_params, wait=wait)
 
-        print_success("Jog command sent")
+        if wait:
+            print_success("Move complete")
+        else:
+            print_success("Jog command sent")
         client.shutdown()
 
     except Exception as e:
