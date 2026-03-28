@@ -70,7 +70,7 @@ dobot_cr/
 ### Configuration
 - `dobot_config.yaml` - Default config (version controlled)
 - `dobot_config.local.yaml` - Local overrides (gitignored)
-- Robot IP: `10.11.6.69` (pre-configured for your robot)
+- Robot IP: `10.11.6.68` (pre-configured for your robot)
 
 ### Scripts
 - `./dobot-cr.sh` - Convenience wrapper (auto-activates venv)

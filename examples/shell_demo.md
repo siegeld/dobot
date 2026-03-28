@@ -4,13 +4,13 @@
 
 ```bash
 $ ./dobot-cr.sh shell
-ℹ Connecting to robot at 10.11.6.69...
+ℹ Connecting to robot at 10.11.6.68...
 ✓ Connected!
 
 ╭──────────────────────────────────────────────────────────────╮
 │ Dobot CR Interactive Shell                                   │
 │                                                              │
-│ Connected to: 10.11.6.69                                     │
+│ Connected to: 10.11.6.68                                     │
 │ Type help for available commands, exit or quit to leave     │
 │ Emacs keybindings enabled (Ctrl+A, Ctrl+E, etc.)           │
 ╰──────────────────────────────────────────────────────────────╯
@@ -84,7 +84,7 @@ dobot> status
 │ Status        │ Value   │
 ├───────────────┼─────────┤
 │ Connected     │ Yes     │
-│ Robot IP      │ 10.11.6.69 │
+│ Robot IP      │ 10.11.6.68 │
 │ Control Port  │ 29999   │
 │ Feedback Port │ 30004   │
 └───────────────┴─────────┘

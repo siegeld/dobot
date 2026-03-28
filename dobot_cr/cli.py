@@ -265,7 +265,7 @@ def shell(ctx: click.Context, ip: Optional[str]) -> None:
 
       dobot-cr shell                 # Start interactive shell
 
-      dobot-cr shell --ip 10.11.6.69 # Connect to specific IP
+      dobot-cr shell --ip 10.11.6.68 # Connect to specific IP
     """
     config: Config = ctx.obj["config"]
     sys.exit(start_shell(config, ip))

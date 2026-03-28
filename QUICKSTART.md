@@ -140,7 +140,7 @@ Edit `dobot_config.yaml` to change settings:
 
 ```yaml
 robot:
-  ip: "10.11.6.69"      # Your robot's IP
+  ip: "10.11.6.68"      # Your robot's IP
   control_port: 29999
   feedback_port: 30004
   timeout: 5
@@ -171,7 +171,7 @@ See `examples/basic_usage.py` and `examples/advanced_control.py` for more.
 
 ### Connection Issues
 
-1. Verify robot IP: `ping 10.11.6.69`
+1. Verify robot IP: `ping 10.11.6.68`
 2. Check robot is powered and in TCP/IP mode
 3. Ensure ports 29999 and 30004 are accessible
 

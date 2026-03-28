@@ -44,7 +44,7 @@ Create or edit `dobot_config.yaml`:
 
 ```yaml
 robot:
-  ip: "10.11.6.69"          # Your robot's IP address
+  ip: "10.11.6.68"          # Your robot's IP address
   control_port: 29999       # Default control port
   feedback_port: 30004      # Default feedback port
   timeout: 5                # Connection timeout (seconds)
@@ -113,8 +113,8 @@ Execute a single command and exit:
 
 ```bash
 dobot-cr connect
-# ℹ Connecting to robot at 10.11.6.69...
-# ✓ Successfully connected to robot at 10.11.6.69
+# ℹ Connecting to robot at 10.11.6.68...
+# ✓ Successfully connected to robot at 10.11.6.68
 ```
 
 ##### Get Robot Position
@@ -367,12 +367,12 @@ Ensure your computer and robot are on the same network:
 ### Connection Timeout
 
 ```bash
-Error: Failed to connect to robot at 10.11.6.69: [Errno 110] Connection timed out
+Error: Failed to connect to robot at 10.11.6.68: [Errno 110] Connection timed out
 ```
 
 **Solutions:**
 - Verify robot IP address in `dobot_config.yaml`
-- Check network connectivity: `ping 10.11.6.69`
+- Check network connectivity: `ping 10.11.6.68`
 - Ensure robot is powered on and in TCP/IP mode
 - Check firewall settings
 

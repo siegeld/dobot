@@ -3,7 +3,7 @@
 
 robot:
   # IP address of your Dobot CR robot
-  ip: "10.11.6.69"
+  ip: "10.11.6.68"
 
   # Control port (default: 29999)
   control_port: 29999
