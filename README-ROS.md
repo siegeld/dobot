@@ -202,6 +202,14 @@ dobot-ros jog j1 5             # Rotate J1 by +5°
 dobot-ros jog rz 10 --mode tool  # Rotate in tool frame
 
 dobot-ros config-show          # Show configuration
+
+# Gripper control (DH Robotics AG-95 / PGE / RGD)
+dobot-ros gripper init         # Initialize gripper
+dobot-ros gripper open         # Open gripper
+dobot-ros gripper close        # Close gripper
+dobot-ros gripper move 500     # Move to position (0=closed, 1000=open)
+dobot-ros gripper close -s 80 -f 100  # Close at speed=80 force=100
+dobot-ros gripper status       # Show gripper position and state
 ```
 
 ### Interactive Shell
@@ -228,11 +236,97 @@ Shell commands:
 | `disable` | | Disable the robot |
 | `clear` | | Clear robot errors |
 | `stop` | | Stop robot motion |
+| `gripper init` | `grip init` | Initialize gripper |
+| `gripper open [spd] [frc]` | | Open gripper |
+| `gripper close [spd] [frc]` | | Close gripper |
+| `gripper move <pos> [spd] [frc]` | | Move gripper (0=closed, 1000=open) |
+| `gripper status` | | Show gripper position and state |
 | `status` | | Show connection status |
 | `debug` | | Toggle debug mode |
 | `dance <deg> <count>` | | Random dance motion |
 | `help` | `?` | Show help |
 | `exit` | `quit` | Exit shell |
+
+---
+
+## Gripper Control (DH Robotics)
+
+Supports DH Robotics grippers (AG-95, PGE, RGD, PGC series) connected to the Dobot tool flange via RS485.
+
+### How it Works
+
+The gripper communicates through the Dobot controller's **internal Modbus TCP gateway** at `127.0.0.1:60000`. This is the same path used by the DHGrip Dobot Studio plugin.
+
+```
+CLI / Action Server
+        │
+        ▼  ROS2 Services
+  ModbusCreate(127.0.0.1, 60000, slave_id=1)
+  SetHoldRegs / GetHoldRegs
+        │
+        ▼  Dobot Controller Internal Gateway
+  127.0.0.1:60000 → Tool RS485 → Gripper
+```
+
+### Register Map
+
+| Register | Address | Read/Write | Range | Description |
+|----------|---------|------------|-------|-------------|
+| Init | 0x0100 (256) | Write | 0xA5 (165) | Full initialization |
+| Force | 0x0101 (257) | R/W | 20-100 % | Grip force |
+| Position | 0x0103 (259) | R/W | 0-1000 | 0=closed, 1000=open |
+| Speed | 0x0104 (260) | R/W | 1-100 % | Movement speed |
+| Init Status | 0x0200 (512) | Read | 0/1 | 0=not init, 1=initialized |
+| Grip State | 0x0201 (513) | Read | 0-3 | 0=moving, 1=reached, 2=caught, 3=dropped |
+| Current Pos | 0x0202 (514) | Read | 0-1000 | Actual position |
+
+### ROS2 Action Server
+
+The `gripper_server` node provides a `gripper` action for programmatic control:
+
+```bash
+# Launch with other action servers
+ros2 launch dobot_actions actions.launch.py
+
+# Send goals
+ros2 action send_goal /gripper dobot_actions/action/Gripper \
+  "{position: 0, speed: 50, force: 80}" --feedback
+
+# Open
+ros2 action send_goal /gripper dobot_actions/action/Gripper \
+  "{position: 1000, speed: 100, force: 50}"
+```
+
+### CLI Usage
+
+```bash
+# One-shot commands
+dobot-ros gripper init                  # Initialize (moves to find limits)
+dobot-ros gripper close                 # Close fully
+dobot-ros gripper open                  # Open fully
+dobot-ros gripper move 500              # Move to 50% open
+dobot-ros gripper close -s 80 -f 100   # Close fast with max force
+dobot-ros gripper status                # Read position and state
+
+# Interactive shell
+dobot-ros shell
+dobot-ros> gripper init
+dobot-ros> gripper close 30 80         # speed=30, force=80
+dobot-ros> gripper open
+dobot-ros> gripper status
+```
+
+### Default Communication Parameters
+
+| Parameter | Value |
+|-----------|-------|
+| Slave ID | 1 |
+| Baud Rate | 115200 |
+| Parity | None |
+| Data Bits | 8 |
+| Stop Bits | 1 |
+
+These are configured in the gripper itself (via DH-Robotics UI software). The Dobot controller's internal gateway handles the RS485 communication transparently.
 
 ---
 

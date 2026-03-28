@@ -56,6 +56,7 @@ class DobotShell:
                 'j1', 'j2', 'j3', 'j4', 'j5', 'j6',
                 'user', 'tool',
                 'enable', 'disable', 'clear', 'stop',
+                'gripper', 'grip', 'open', 'close',
                 'dance', 'status', 'debug', 'sync',
                 'help', 'exit', 'quit',
             ],
@@ -100,6 +101,11 @@ class DobotShell:
         table.add_row("jog rx/ry/rz [deg]", "", "Rotation: jog rz 5")
         table.add_row("jog mode <user|tool>", "", "Switch coordinate frame")
         table.add_row("dance <deg> <count>", "", "Random dance motion")
+        table.add_row("gripper init", "", "Initialize gripper")
+        table.add_row("gripper open [speed] [force]", "", "Open gripper (default 50/50)")
+        table.add_row("gripper close [speed] [force]", "", "Close gripper (default 50/50)")
+        table.add_row("gripper move <pos> [spd] [frc]", "", "Move gripper (0=closed, 1000=open)")
+        table.add_row("gripper status", "", "Show gripper position and state")
         table.add_row("enable", "", "Enable the robot")
         table.add_row("disable", "", "Disable the robot")
         table.add_row("clear", "", "Clear robot errors")
@@ -403,6 +409,92 @@ class DobotShell:
         except Exception as e:
             self.console.print(f"[bold red]Error:[/bold red] {e}")
 
+    def cmd_gripper(self, args: list) -> None:
+        """Handle gripper commands."""
+        if not args:
+            self.console.print(
+                "[bold red]Usage:[/bold red] gripper <init|open|close|move|status>\n"
+                "  gripper init              Initialize gripper\n"
+                "  gripper open [spd] [frc]  Open (default speed=50 force=50)\n"
+                "  gripper close [spd] [frc] Close (default speed=50 force=50)\n"
+                "  gripper move <pos> [spd] [frc]  Move to position (0=closed, 1000=open)\n"
+                "  gripper status            Show gripper state"
+            )
+            return
+
+        subcmd = args[0]
+
+        if subcmd == 'init':
+            try:
+                self.console.print("[bold blue]→[/bold blue] Initializing gripper...")
+                self.client.gripper_init()
+                self.console.print("[bold green]✓[/bold green] Gripper initialized")
+            except Exception as e:
+                self.console.print(f"[bold red]Error:[/bold red] {e}")
+
+        elif subcmd == 'open':
+            speed = int(args[1]) if len(args) > 1 else 50
+            force = int(args[2]) if len(args) > 2 else 50
+            try:
+                self.console.print(f"[bold blue]→[/bold blue] Opening gripper (speed={speed} force={force})...")
+                state = self.client.gripper_open(force=force, speed=speed)
+                states = {1: 'Position reached', 2: 'Object caught', 3: 'Object dropped', -1: 'Timeout'}
+                self.console.print(f"[bold green]✓[/bold green] {states.get(state, f'State={state}')}")
+            except Exception as e:
+                self.console.print(f"[bold red]Error:[/bold red] {e}")
+
+        elif subcmd == 'close':
+            speed = int(args[1]) if len(args) > 1 else 50
+            force = int(args[2]) if len(args) > 2 else 50
+            try:
+                self.console.print(f"[bold blue]→[/bold blue] Closing gripper (speed={speed} force={force})...")
+                state = self.client.gripper_close(force=force, speed=speed)
+                states = {1: 'Position reached', 2: 'Object caught', 3: 'Object dropped', -1: 'Timeout'}
+                self.console.print(f"[bold green]✓[/bold green] {states.get(state, f'State={state}')}")
+            except Exception as e:
+                self.console.print(f"[bold red]Error:[/bold red] {e}")
+
+        elif subcmd == 'move':
+            if len(args) < 2:
+                self.console.print("[bold red]Error:[/bold red] Usage: gripper move <position> [speed] [force]")
+                return
+            try:
+                position = int(args[1])
+                speed = int(args[2]) if len(args) > 2 else 50
+                force = int(args[3]) if len(args) > 3 else 50
+                self.console.print(
+                    f"[bold blue]→[/bold blue] Moving gripper to {position} "
+                    f"(speed={speed} force={force})...")
+                state = self.client.gripper_move(position, force=force, speed=speed)
+                states = {1: 'Position reached', 2: 'Object caught', 3: 'Object dropped', -1: 'Timeout'}
+                self.console.print(f"[bold green]✓[/bold green] {states.get(state, f'State={state}')}")
+            except ValueError:
+                self.console.print("[bold red]Error:[/bold red] Position must be a number (0-1000)")
+            except Exception as e:
+                self.console.print(f"[bold red]Error:[/bold red] {e}")
+
+        elif subcmd == 'status':
+            try:
+                if self.client._gripper_modbus_index < 0:
+                    self.console.print("[yellow]Gripper not connected. Run 'gripper init' first.[/yellow]")
+                    return
+                pos = self.client.gripper_get_position()
+                state = self.client.gripper_get_state()
+                init = self.client.gripper_get_init_status()
+                state_names = {0: 'Moving', 1: 'Reached', 2: 'Object caught', 3: 'Object dropped'}
+                table = Table(title="Gripper Status", box=box.ROUNDED)
+                table.add_column("Parameter", style="cyan")
+                table.add_column("Value", style="yellow")
+                table.add_row("Initialized", 'Yes' if init == 1 else 'No')
+                table.add_row("Position", f'{pos}/1000' if pos is not None else 'N/A')
+                table.add_row("State", state_names.get(state, str(state)) if state is not None else 'N/A')
+                self.console.print(table)
+            except Exception as e:
+                self.console.print(f"[bold red]Error:[/bold red] {e}")
+
+        else:
+            self.console.print(f"[bold red]Unknown gripper command:[/bold red] {subcmd}")
+
     def process_command(self, cmd: str) -> bool:
         """Process a command. Returns False to exit."""
         cmd = cmd.strip().lower()
@@ -441,6 +533,8 @@ class DobotShell:
             self.cmd_sync()
         elif command == 'dance':
             self.cmd_dance(parts[1:])
+        elif command in ('gripper', 'grip'):
+            self.cmd_gripper(parts[1:])
         else:
             self.console.print(
                 f"[bold red]Unknown command:[/bold red] {command}\n"

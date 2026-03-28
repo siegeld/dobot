@@ -58,6 +58,11 @@ In Terminal 2:
 | `jog x 10` | Move X +10mm |
 | `jog j1 5` | Rotate J1 +5° |
 | `jog mode tool` | Switch to tool coordinates |
+| `gripper init` | Initialize DH Robotics gripper |
+| `gripper open` | Open gripper |
+| `gripper close` | Close gripper |
+| `gripper move 500` | Move to position (0=closed, 1000=open) |
+| `gripper status` | Show gripper state |
 | `debug` | Toggle debug mode (confirms before moves) |
 | `help` | Show all commands |
 | `exit` | Exit shell |

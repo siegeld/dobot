@@ -418,12 +418,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Roadmap
 
 - [ ] Add movement commands (MovJ, MovL, Arc)
-- [ ] Add gripper control
+- [x] Add gripper control (DH Robotics via ROS2)
 - [ ] Add digital I/O control
 - [ ] Add trajectory recording/playback
 - [ ] Add safety monitoring
 - [ ] Add web-based dashboard
-- [ ] Add ROS 2 integration
+- [x] Add ROS 2 integration
 
 ---
 

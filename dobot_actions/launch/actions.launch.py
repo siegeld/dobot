@@ -18,4 +18,10 @@ def generate_launch_description():
             name='move_cartesian_server',
             output='screen',
         ),
+        Node(
+            package='dobot_actions',
+            executable='gripper_server.py',
+            name='gripper_server',
+            output='screen',
+        ),
     ])

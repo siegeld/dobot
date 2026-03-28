@@ -408,6 +408,141 @@ def completion() -> None:
     )
 
 
+@cli.group()
+def gripper():
+    """Control the DH Robotics gripper."""
+    pass
+
+
+@gripper.command('init')
+@click.pass_context
+def gripper_init(ctx: click.Context) -> None:
+    """Initialize the gripper."""
+    config: Config = ctx.obj["config"]
+    client = ctx.obj.get("client")
+    if client is None:
+        client = _create_client(config)
+        ctx.obj["client"] = client
+    try:
+        print_info("Initializing gripper...")
+        client.gripper_init()
+        print_success("Gripper initialized")
+    except Exception as e:
+        print_error(f"Gripper init failed: {e}")
+        sys.exit(1)
+    finally:
+        client.shutdown()
+
+
+@gripper.command('open')
+@click.option('--speed', '-s', default=50, type=int, help='Speed 1-100 (default 50)')
+@click.option('--force', '-f', default=50, type=int, help='Force 20-100 (default 50)')
+@click.pass_context
+def gripper_open(ctx: click.Context, speed: int, force: int) -> None:
+    """Open the gripper."""
+    config: Config = ctx.obj["config"]
+    client = _create_client(config)
+    try:
+        client.gripper_init()
+        print_info(f"Opening gripper (speed={speed} force={force})...")
+        state = client.gripper_open(force=force, speed=speed)
+        _print_grip_result(state)
+    except Exception as e:
+        print_error(str(e))
+        sys.exit(1)
+    finally:
+        client.shutdown()
+
+
+@gripper.command('close')
+@click.option('--speed', '-s', default=50, type=int, help='Speed 1-100 (default 50)')
+@click.option('--force', '-f', default=50, type=int, help='Force 20-100 (default 50)')
+@click.pass_context
+def gripper_close(ctx: click.Context, speed: int, force: int) -> None:
+    """Close the gripper."""
+    config: Config = ctx.obj["config"]
+    client = _create_client(config)
+    try:
+        client.gripper_init()
+        print_info(f"Closing gripper (speed={speed} force={force})...")
+        state = client.gripper_close(force=force, speed=speed)
+        _print_grip_result(state)
+    except Exception as e:
+        print_error(str(e))
+        sys.exit(1)
+    finally:
+        client.shutdown()
+
+
+@gripper.command('move')
+@click.argument('position', type=int)
+@click.option('--speed', '-s', default=50, type=int, help='Speed 1-100 (default 50)')
+@click.option('--force', '-f', default=50, type=int, help='Force 20-100 (default 50)')
+@click.pass_context
+def gripper_move(ctx: click.Context, position: int, speed: int, force: int) -> None:
+    """Move gripper to position (0=closed, 1000=open)."""
+    config: Config = ctx.obj["config"]
+    client = _create_client(config)
+    try:
+        client.gripper_init()
+        print_info(f"Moving gripper to {position} (speed={speed} force={force})...")
+        state = client.gripper_move(position, force=force, speed=speed)
+        _print_grip_result(state)
+    except Exception as e:
+        print_error(str(e))
+        sys.exit(1)
+    finally:
+        client.shutdown()
+
+
+@gripper.command('status')
+@click.pass_context
+def gripper_status(ctx: click.Context) -> None:
+    """Show gripper status."""
+    config: Config = ctx.obj["config"]
+    client = _create_client(config)
+    try:
+        client.gripper_connect()
+        pos = client.gripper_get_position()
+        state = client.gripper_get_state()
+        init = client.gripper_get_init_status()
+        state_names = {0: 'Moving', 1: 'Reached', 2: 'Object caught', 3: 'Object dropped'}
+        table = Table(title="Gripper Status", box=box.ROUNDED)
+        table.add_column("Parameter", style="cyan")
+        table.add_column("Value", style="yellow")
+        table.add_row("Initialized", 'Yes' if init == 1 else 'No')
+        table.add_row("Position", f'{pos}/1000' if pos is not None else 'N/A')
+        table.add_row("State", state_names.get(state, str(state)) if state is not None else 'N/A')
+        console.print(table)
+    except Exception as e:
+        print_error(str(e))
+        sys.exit(1)
+    finally:
+        client.shutdown()
+
+
+def _create_client(config: Config) -> DobotRosClient:
+    """Create a ROS2 client."""
+    if not rclpy.ok():
+        rclpy.init()
+    return DobotRosClient(
+        namespace=config.ros_namespace,
+        service_timeout=config.service_timeout,
+    )
+
+
+def _print_grip_result(state: int) -> None:
+    """Print gripper result."""
+    states = {1: 'Position reached', 2: 'Object caught', 3: 'Object dropped', -1: 'Timeout'}
+    msg = states.get(state, f'State={state}')
+    if state in (1, 2):
+        print_success(msg)
+    elif state == -1:
+        print_error(msg)
+    else:
+        print_info(msg)
+
+
 def main() -> None:
     """Entry point for the CLI."""
     try:

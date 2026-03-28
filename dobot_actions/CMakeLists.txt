@@ -8,12 +8,14 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "action/MoveJoints.action"
   "action/MoveCartesian.action"
+  "action/Gripper.action"
 )
 
 # Install Python executables
 install(PROGRAMS
   scripts/move_joints_server.py
   scripts/move_cartesian_server.py
+  scripts/gripper_server.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

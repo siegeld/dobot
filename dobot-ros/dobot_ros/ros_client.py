@@ -24,6 +24,10 @@ from dobot_msgs_v4.srv import (
     SpeedFactor,
     RobotMode,
     Stop,
+    ModbusCreate,
+    ModbusClose,
+    SetHoldRegs,
+    GetHoldRegs,
 )
 
 
@@ -95,6 +99,20 @@ class DobotRosClient(Node):
             RobotMode, f'{self._srv_prefix}RobotMode')
         self._stop_client = self.create_client(
             Stop, f'{self._srv_prefix}Stop')
+
+        # Gripper (Modbus) service clients
+        self._modbus_create_client = self.create_client(
+            ModbusCreate, f'{self._srv_prefix}ModbusCreate')
+        self._modbus_close_client = self.create_client(
+            ModbusClose, f'{self._srv_prefix}ModbusClose')
+        self._set_hold_regs_client = self.create_client(
+            SetHoldRegs, f'{self._srv_prefix}SetHoldRegs')
+        self._get_hold_regs_client = self.create_client(
+            GetHoldRegs, f'{self._srv_prefix}GetHoldRegs')
+
+        # Gripper state
+        self._gripper_modbus_index = -1
+        self._gripper_initialized = False
 
     def _wait_for_service(self, client, timeout: float = None) -> bool:
         """Wait for a service to become available."""
@@ -395,6 +413,128 @@ class DobotRosClient(Node):
 
         return response.res
 
+    # ── Gripper API ──────────────────────────────────────────────
+
+    def _gripper_write_reg(self, addr: int, value: int):
+        """Write a single holding register to the gripper."""
+        req = SetHoldRegs.Request()
+        req.index = self._gripper_modbus_index
+        req.addr = addr
+        req.count = 1
+        req.val_tab = '{' + str(value) + '}'
+        req.val_type = 'U16'
+        result = self._call_service(self._set_hold_regs_client, req)
+        if result.res != 0:
+            raise RuntimeError(f'SetHoldRegs failed: addr={addr} res={result.res}')
+
+    def _gripper_read_reg(self, addr: int) -> Optional[int]:
+        """Read a single holding register from the gripper."""
+        req = GetHoldRegs.Request()
+        req.index = self._gripper_modbus_index
+        req.addr = addr
+        req.count = 1
+        req.val_type = 'U16'
+        result = self._call_service(self._get_hold_regs_client, req)
+        match = re.search(r'\{(\d+)\}', result.robot_return)
+        if match:
+            return int(match.group(1))
+        return None
+
+    def gripper_connect(self, slave_id: int = 1):
+        """Create Modbus TCP connection to gripper via internal gateway."""
+        req = ModbusCreate.Request()
+        req.ip = '127.0.0.1'
+        req.port = 60000
+        req.slave_id = slave_id
+        req.is_rtu = 1
+        result = self._call_service(self._modbus_create_client, req)
+        match = re.search(r'\{(\d+)\}', result.robot_return)
+        self._gripper_modbus_index = int(match.group(1)) if match else 0
+
+    def gripper_disconnect(self):
+        """Close Modbus connection to gripper."""
+        if self._gripper_modbus_index >= 0:
+            req = ModbusClose.Request()
+            req.index = self._gripper_modbus_index
+            self._call_service(self._modbus_close_client, req)
+            self._gripper_modbus_index = -1
+            self._gripper_initialized = False
+
+    def gripper_init(self, timeout: float = 15.0):
+        """Initialize the gripper (full init, 0xA5). Blocks until ready."""
+        if self._gripper_modbus_index < 0:
+            self.gripper_connect()
+        self._gripper_write_reg(256, 165)  # 0x0100 = 0xA5
+        import time
+        start = time.time()
+        while time.time() - start < timeout:
+            status = self._gripper_read_reg(512)  # 0x0200
+            if status == 1:
+                self._gripper_initialized = True
+                return
+            time.sleep(0.5)
+        raise RuntimeError('Gripper init timed out')
+
+    def gripper_move(
+        self,
+        position: int,
+        force: int = 50,
+        speed: int = 50,
+        wait: bool = True,
+        timeout: float = 10.0,
+    ) -> int:
+        """
+        Move gripper to position.
+
+        Args:
+            position: 0 (closed) to 1000 (open)
+            force: 20-100 percent
+            speed: 1-100 percent
+            wait: block until motion completes
+            timeout: max wait time in seconds
+
+        Returns:
+            Grip state: 1=reached, 2=object caught, 3=object dropped
+        """
+        if self._gripper_modbus_index < 0:
+            raise RuntimeError('Gripper not connected. Call gripper_init() first.')
+        self._gripper_write_reg(257, force)    # 0x0101
+        self._gripper_write_reg(260, speed)    # 0x0104
+        self._gripper_write_reg(259, position) # 0x0103
+
+        if not wait:
+            return 0
+
+        import time
+        start = time.time()
+        while time.time() - start < timeout:
+            state = self._gripper_read_reg(513)  # 0x0201
+            if state is not None and state != 0:
+                return state
+            time.sleep(0.05)
+        return -1  # timeout
+
+    def gripper_open(self, force: int = 50, speed: int = 50, wait: bool = True) -> int:
+        """Open gripper fully."""
+        return self.gripper_move(1000, force=force, speed=speed, wait=wait)
+
+    def gripper_close(self, force: int = 50, speed: int = 50, wait: bool = True) -> int:
+        """Close gripper fully."""
+        return self.gripper_move(0, force=force, speed=speed, wait=wait)
+
+    def gripper_get_position(self) -> Optional[int]:
+        """Read current gripper position (0=closed, 1000=open)."""
+        return self._gripper_read_reg(514)  # 0x0202
+
+    def gripper_get_state(self) -> Optional[int]:
+        """Read grip state: 0=moving, 1=reached, 2=caught, 3=dropped."""
+        return self._gripper_read_reg(513)  # 0x0201
+
+    def gripper_get_init_status(self) -> Optional[int]:
+        """Read init status: 0=not initialized, 1=initialized."""
+        return self._gripper_read_reg(512)  # 0x0200
+
     def shutdown(self):
         """Shutdown the ROS2 client."""
+        self.gripper_disconnect()
         self.destroy_node()

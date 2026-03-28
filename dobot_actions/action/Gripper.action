@@ -1,0 +1,14 @@
+# Goal: control DH Robotics gripper via Modbus TCP
+uint16 position    # 0 (fully closed) to 1000 (fully open)
+uint8 speed        # 1-100 (percent)
+uint8 force        # 20-100 (percent)
+---
+# Result
+bool success
+string message
+uint16 final_position  # actual position (0-1000)
+uint16 status          # 0=in motion, 1=reached, 2=object caught, 3=object dropped
+---
+# Feedback
+uint16 current_position
+uint16 status          # 0=in motion, 1=reached, 2=object caught, 3=object dropped
