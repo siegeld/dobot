@@ -4,6 +4,7 @@ Robot controller wrapper for Dobot CR series.
 
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -95,6 +96,7 @@ class DobotController:
             except Exception:
                 # Continue polling even on errors
                 pass
+            time.sleep(0.008)  # ~8ms matches Dobot feedback cycle
 
     def connect(self, speed_factor: int = 10) -> bool:
         """
