@@ -285,26 +285,90 @@ with DobotController(
     print(f"J1 angle: {pos.joint[0]}°")
 ```
 
+## ROS2 Version (Docker)
+
+A ROS2-based version runs the driver in Docker and provides additional features like action servers and gripper control. See [README-ROS.md](README-ROS.md) for full details.
+
+### Quick Start
+
+```bash
+# Configure robot IP
+cp .env.example .env
+vim .env                    # Set ROBOT_IP and ROBOT_TYPE
+
+# Build (first time only, ~15 min)
+docker compose build
+
+# Terminal 1: Start ROS2 driver
+./dobot-driver.sh
+
+# Terminal 2: Use CLI
+./dobot-shell.sh            # Interactive shell
+./dobot.sh position         # One-shot command
+./dobot.sh jog x 10         # Jog +10mm in X
+```
+
+Code changes to `dobot-ros/` take effect immediately (volume-mounted, no rebuild).
+
+### ROS2 Shell Commands
+
+| Command | Description |
+|---------|-------------|
+| `position` | Show joint and cartesian position |
+| `enable` / `disable` | Enable/disable robot |
+| `clear` | Clear errors |
+| `stop` | Stop motion |
+| `jog x 10` | Move X +10mm |
+| `jog j1 5` | Rotate J1 +5° |
+| `jog mode tool` | Switch to tool coordinates |
+| `gripper init` | Initialize DH Robotics gripper |
+| `gripper open` / `close` | Open/close gripper |
+| `gripper move 500` | Move gripper (0=closed, 1000=open) |
+| `gripper dance 5` | Random open/close dance (5 cycles) |
+| `gripper status` | Show gripper state |
+| `dance 5 10` | Random arm dance (10 moves, ±5°) |
+| `debug` | Toggle debug mode |
+| `sync` | Toggle sync/async motion |
+
+### ROS2 One-Shot Commands
+
+```bash
+./dobot.sh connect                      # Test connection
+./dobot.sh position --format json       # Position as JSON
+./dobot.sh jog z -5 --mode tool         # Jog in tool frame
+./dobot.sh enable                       # Enable robot
+./dobot.sh gripper dance 10 -s 100      # Fast gripper dance
+```
+
+---
+
 ## Project Structure
 
 ```
-dobot-cr-controller/
-├── dobot_cr/              # Main package
-│   ├── __init__.py        # Package initialization
-│   ├── __main__.py        # Allow 'python -m dobot_cr'
-│   ├── cli.py             # Click-based CLI interface
+dobot/
+├── dobot_cr/              # Direct TCP/IP controller (native)
+│   ├── cli.py             # Click-based CLI
 │   ├── config.py          # Configuration management
-│   └── robot.py           # Robot controller wrapper
-├── TCP-IP-Python-V4/      # Official Dobot SDK
-├── examples/              # Usage examples
-├── scripts/               # Build and setup scripts
-├── dobot_config.yaml      # Default configuration
-├── requirements.txt       # Python dependencies
-├── requirements-dev.txt   # Development dependencies
-├── pyproject.toml         # Modern Python packaging
-├── README.md              # This file
-├── CHANGELOG.md           # Version history
-└── LICENSE                # MIT License
+│   ├── robot.py           # Robot controller wrapper
+│   └── shell.py           # Interactive shell
+├── dobot-ros/             # ROS2 CLI (runs in Docker)
+│   └── dobot_ros/
+│       ├── cli.py         # Click-based CLI
+│       ├── config.py      # Configuration
+│       ├── ros_client.py  # ROS2 service client + gripper API
+│       └── shell.py       # Interactive shell
+├── dobot_actions/         # ROS2 action servers
+│   ├── action/            # Action definitions (.action files)
+│   └── scripts/           # Action server nodes
+├── DOBOT_6Axis_ROS2_V4/   # Vendor ROS2 driver packages
+├── TCP-IP-Python-V4/      # Vendor TCP/IP SDK
+├── docker/                # Dockerfile, entrypoint, FastRTPS config
+├── docker-compose.yml     # Docker services
+├── dobot-driver.sh        # Start ROS2 driver
+├── dobot-shell.sh         # Start ROS2 interactive shell
+├── dobot.sh               # Run ROS2 CLI commands
+├── dobot-cr.sh            # Run direct TCP/IP CLI
+└── .env                   # Robot IP and type (not committed)
 ```
 
 ## Development
@@ -411,9 +475,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-- 📖 [Documentation](https://github.com/yourusername/dobot-cr-controller#readme)
-- 🐛 [Issue Tracker](https://github.com/yourusername/dobot-cr-controller/issues)
-- 💬 [Discussions](https://github.com/yourusername/dobot-cr-controller/discussions)
+- 📖 [Documentation](https://github.com/siegeld/dobot#readme)
+- 🐛 [Issue Tracker](https://github.com/siegeld/dobot/issues)
+- 💬 [Discussions](https://github.com/siegeld/dobot/discussions)
 
 ## Roadmap
 
