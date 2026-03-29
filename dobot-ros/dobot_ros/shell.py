@@ -105,6 +105,7 @@ class DobotShell:
         table.add_row("gripper open [speed] [force]", "", "Open gripper (default 50/50)")
         table.add_row("gripper close [speed] [force]", "", "Close gripper (default 50/50)")
         table.add_row("gripper move <pos> [spd] [frc]", "", "Move gripper (0=closed, 1000=open)")
+        table.add_row("gripper dance <cycles> [spd] [frc]", "", "Random open/close dance")
         table.add_row("gripper status", "", "Show gripper position and state")
         table.add_row("enable", "", "Enable the robot")
         table.add_row("disable", "", "Disable the robot")
@@ -413,11 +414,12 @@ class DobotShell:
         """Handle gripper commands."""
         if not args:
             self.console.print(
-                "[bold red]Usage:[/bold red] gripper <init|open|close|move|status>\n"
+                "[bold red]Usage:[/bold red] gripper <init|open|close|move|dance|status>\n"
                 "  gripper init              Initialize gripper\n"
                 "  gripper open [spd] [frc]  Open (default speed=50 force=50)\n"
                 "  gripper close [spd] [frc] Close (default speed=50 force=50)\n"
                 "  gripper move <pos> [spd] [frc]  Move to position (0=closed, 1000=open)\n"
+                "  gripper dance <cycles> [spd] [frc]  Random open/close dance\n"
                 "  gripper status            Show gripper state"
             )
             return
@@ -470,6 +472,28 @@ class DobotShell:
                 self.console.print(f"[bold green]✓[/bold green] {states.get(state, f'State={state}')}")
             except ValueError:
                 self.console.print("[bold red]Error:[/bold red] Position must be a number (0-1000)")
+            except Exception as e:
+                self.console.print(f"[bold red]Error:[/bold red] {e}")
+
+        elif subcmd == 'dance':
+            if len(args) < 2:
+                self.console.print("[bold red]Error:[/bold red] Usage: gripper dance <cycles> [speed] [force]")
+                return
+            try:
+                import random
+                cycles = int(args[1])
+                speed = int(args[2]) if len(args) > 2 else 80
+                force = int(args[3]) if len(args) > 3 else 50
+                self.console.print(
+                    f"[bold blue]→[/bold blue] Gripper dance: {cycles} cycles "
+                    f"(speed={speed} force={force})")
+                for i in range(cycles):
+                    pos = random.randint(0, 1000)
+                    self.console.print(f"  [{i+1}/{cycles}] -> {pos}")
+                    self.client.gripper_move(pos, force=force, speed=speed)
+                self.console.print("[bold green]✓[/bold green] Dance complete")
+            except ValueError:
+                self.console.print("[bold red]Error:[/bold red] Cycles must be a number")
             except Exception as e:
                 self.console.print(f"[bold red]Error:[/bold red] {e}")
 

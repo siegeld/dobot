@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+venv/
+.git/
+.claude/
+.env
+.dobot_history
+.dobot_ros_history
+TCP-IP-ROS-6Axis/
+dobot_cr/
+dobot_cr_controller.egg-info/

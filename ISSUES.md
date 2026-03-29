@@ -18,8 +18,8 @@
 git rm --cached .env
 ```
 
-### 4. `dobot_ros_config.yaml` is a directory, not a file
-`dobot_ros_config.yaml` was created as an empty directory (by root), but `docker-compose.yml` mounts it as a file. This will cause a Docker mount error.
+### 4. ~~`dobot_ros_config.yaml` is a directory, not a file~~ (FIXED)
+Fixed: replaced directory with file, removed broken mount from docker-compose.yml.
 
 ## Medium Priority
 

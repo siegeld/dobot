@@ -163,7 +163,7 @@ class DobotRosClient(Node):
 
     def check_connection(self) -> bool:
         """Check if dobot_bringup_v4 services are available."""
-        return self._wait_for_service(self._get_angle_client, timeout=2.0)
+        return self._wait_for_service(self._get_angle_client)
 
     def enable_robot(self) -> int:
         """Enable the robot."""

@@ -32,8 +32,12 @@ Docker is the easiest way to run the ROS2 stack on any Linux system (Fedora, Ubu
 cd /path/to/dobot
 
 # Build (first time takes ~15 minutes for ROS2 message generation)
-docker compose build dobot
+docker compose build
 ```
+
+Code changes to `dobot-ros/` are volume-mounted into the container and take effect
+immediately — no rebuild needed. Only rebuild when changing `dobot_actions/`,
+`DOBOT_6Axis_ROS2_V4/`, or the Dockerfile itself.
 
 ### Configuration
 
@@ -210,6 +214,8 @@ dobot-ros gripper close        # Close gripper
 dobot-ros gripper move 500     # Move to position (0=closed, 1000=open)
 dobot-ros gripper close -s 80 -f 100  # Close at speed=80 force=100
 dobot-ros gripper status       # Show gripper position and state
+dobot-ros gripper dance 5      # Random open/close dance (5 cycles)
+dobot-ros gripper dance 10 -s 100  # Fast dance, 10 cycles
 ```
 
 ### Interactive Shell
@@ -240,6 +246,7 @@ Shell commands:
 | `gripper open [spd] [frc]` | | Open gripper |
 | `gripper close [spd] [frc]` | | Close gripper |
 | `gripper move <pos> [spd] [frc]` | | Move gripper (0=closed, 1000=open) |
+| `gripper dance <cycles> [spd] [frc]` | | Random open/close dance |
 | `gripper status` | | Show gripper position and state |
 | `status` | | Show connection status |
 | `debug` | | Toggle debug mode |
@@ -307,12 +314,14 @@ dobot-ros gripper open                  # Open fully
 dobot-ros gripper move 500              # Move to 50% open
 dobot-ros gripper close -s 80 -f 100   # Close fast with max force
 dobot-ros gripper status                # Read position and state
+dobot-ros gripper dance 5              # Random open/close dance (5 cycles)
 
 # Interactive shell
 dobot-ros shell
 dobot-ros> gripper init
 dobot-ros> gripper close 30 80         # speed=30, force=80
 dobot-ros> gripper open
+dobot-ros> gripper dance 5             # Random open/close, 5 cycles
 dobot-ros> gripper status
 ```
 

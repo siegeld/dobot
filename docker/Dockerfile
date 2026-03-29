@@ -28,9 +28,11 @@ RUN . /opt/ros/jazzy/setup.sh && \
     . /ros2_ws/install/setup.sh && \
     colcon build --symlink-install --packages-select dobot_actions
 
-# Copy and install the dobot-ros CLI
-COPY dobot-ros /dobot-ros
-RUN pip3 install --break-system-packages /dobot-ros
+# Install the dobot-ros CLI (creates the dobot-ros command).
+# At runtime, PYTHONPATH is set so the volume-mounted source takes
+# precedence — code changes work without rebuild.
+COPY dobot-ros /dobot-ros-pkg
+RUN pip3 install --break-system-packages /dobot-ros-pkg
 
 # Source workspace on shell entry
 RUN echo "source /ros2_ws/install/setup.bash" >> /root/.bashrc

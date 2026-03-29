@@ -15,10 +15,11 @@ services:
     environment:
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/fastrtps_profile.xml
     volumes:
-      # Mount config for persistence
-      - ./dobot-ros:/dobot-ros:ro
-      - ./dobot_ros_config.yaml:/root/.config/dobot/dobot_ros_config.yaml:ro
+      # Mount dobot-ros code for live editing (no rebuild needed)
+      - ./dobot-ros:/dobot-ros
+      - ./docker/fastrtps_profile.xml:/fastrtps_profile.xml:ro
     stdin_open: true
     tty: true
 

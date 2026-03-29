@@ -495,6 +495,31 @@ def gripper_move(ctx: click.Context, position: int, speed: int, force: int) -> N
         client.shutdown()
 
 
+@gripper.command('dance')
+@click.argument('cycles', type=int)
+@click.option('--speed', '-s', default=80, type=int, help='Speed 1-100 (default 80)')
+@click.option('--force', '-f', default=50, type=int, help='Force 20-100 (default 50)')
+@click.pass_context
+def gripper_dance(ctx: click.Context, cycles: int, speed: int, force: int) -> None:
+    """Open and close the gripper random amounts for CYCLES cycles."""
+    import random
+    config: Config = ctx.obj["config"]
+    client = _create_client(config)
+    try:
+        client.gripper_init()
+        print_info(f"Gripper dance: {cycles} cycles (speed={speed} force={force})")
+        for i in range(cycles):
+            pos = random.randint(0, 1000)
+            console.print(f"  [{i+1}/{cycles}] -> {pos}", style="cyan")
+            client.gripper_move(pos, force=force, speed=speed)
+        print_success("Dance complete")
+    except Exception as e:
+        print_error(str(e))
+        sys.exit(1)
+    finally:
+        client.shutdown()
+
+
 @gripper.command('status')
 @click.pass_context
 def gripper_status(ctx: click.Context) -> None:

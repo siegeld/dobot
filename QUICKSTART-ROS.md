@@ -17,10 +17,11 @@ ROBOT_TYPE=cr5
 ## 2. Build (first time only)
 
 ```bash
-docker compose build dobot
+docker compose build
 ```
 
-This takes ~15 minutes the first time.
+This takes ~15 minutes the first time. Subsequent rebuilds are fast due to layer caching.
+Code changes to `dobot-ros/` are picked up automatically via volume mount — no rebuild needed.
 
 ## 3. Start Driver
 
@@ -62,6 +63,7 @@ In Terminal 2:
 | `gripper open` | Open gripper |
 | `gripper close` | Close gripper |
 | `gripper move 500` | Move to position (0=closed, 1000=open) |
+| `gripper dance 5` | Random open/close dance (5 cycles) |
 | `gripper status` | Show gripper state |
 | `debug` | Toggle debug mode (confirms before moves) |
 | `help` | Show all commands |
