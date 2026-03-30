@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dobot CR5 Controller</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="/static/css/dashboard.css" rel="stylesheet">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+
+<!-- ── Navbar ──────────────────────────────────────────────── -->
+<nav class="navbar navbar-dark sticky-top">
+  <div class="container-fluid">
+    <span class="navbar-brand d-flex align-items-center gap-2">
+      <i class="bi bi-robot"></i>
+      <span>Dobot CR5</span>
+    </span>
+    <div class="d-flex align-items-center gap-3">
+      <span id="badge-mode" class="badge bg-secondary">--</span>
+      <span id="badge-connection" class="status-badge badge-disconnected">
+        <i class="bi bi-circle-fill"></i> Disconnected
+      </span>
+    </div>
+  </div>
+</nav>
+
+<!-- ── Main Content ───────────────────────────────────────── -->
+<div class="container-fluid mt-2">
+  <div class="row g-2">
+
+    <!-- ════ Left Column ════ -->
+    <div class="col-lg-8">
+
+      <!-- 3D Robot View -->
+      <div class="card mb-2">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-badge-3d"></i> Robot View</span>
+          <button class="btn btn-outline-secondary btn-xs" id="btn-reset-camera" title="Reset camera">
+            <i class="bi bi-arrow-counterclockwise"></i> Reset
+          </button>
+        </div>
+        <div class="card-body p-0">
+          <div id="robot-3d-container"></div>
+        </div>
+      </div>
+
+      <!-- Position Display -->
+      <div class="card mb-2">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-crosshair"></i> Robot Position</span>
+          <div class="d-flex gap-2">
+            <span class="badge bg-info" id="update-rate">-- Hz</span>
+          </div>
+        </div>
+        <div class="card-body py-2">
+          <div class="row g-2">
+            <!-- Joint Angles -->
+            <div class="col-md-6">
+              <h6 class="section-label">Joint Angles</h6>
+              <table class="table table-sm table-borderless mb-0 position-table">
+                <tbody>
+                  <tr><td class="axis-label">J1</td><td class="axis-value" id="j1">--</td><td class="axis-unit">&deg;</td>
+                      <td class="axis-bar-cell"><div class="axis-bar"><div class="axis-bar-fill" id="j1-bar"></div></div></td></tr>
+                  <tr><td class="axis-label">J2</td><td class="axis-value" id="j2">--</td><td class="axis-unit">&deg;</td>
+                      <td class="axis-bar-cell"><div class="axis-bar"><div class="axis-bar-fill" id="j2-bar"></div></div></td></tr>
+                  <tr><td class="axis-label">J3</td><td class="axis-value" id="j3">--</td><td class="axis-unit">&deg;</td>
+                      <td class="axis-bar-cell"><div class="axis-bar"><div class="axis-bar-fill" id="j3-bar"></div></div></td></tr>
+                  <tr><td class="axis-label">J4</td><td class="axis-value" id="j4">--</td><td class="axis-unit">&deg;</td>
+                      <td class="axis-bar-cell"><div class="axis-bar"><div class="axis-bar-fill" id="j4-bar"></div></div></td></tr>
+                  <tr><td class="axis-label">J5</td><td class="axis-value" id="j5">--</td><td class="axis-unit">&deg;</td>
+                      <td class="axis-bar-cell"><div class="axis-bar"><div class="axis-bar-fill" id="j5-bar"></div></div></td></tr>
+                  <tr><td class="axis-label">J6</td><td class="axis-value" id="j6">--</td><td class="axis-unit">&deg;</td>
+                      <td class="axis-bar-cell"><div class="axis-bar"><div class="axis-bar-fill" id="j6-bar"></div></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <!-- Cartesian Position -->
+            <div class="col-md-6">
+              <h6 class="section-label">Cartesian Position</h6>
+              <table class="table table-sm table-borderless mb-0 position-table">
+                <tbody>
+                  <tr><td class="axis-label axis-x">X</td><td class="axis-value" id="px">--</td><td class="axis-unit">mm</td>
+                      <td class="axis-bar-cell"><div class="axis-bar"><div class="axis-bar-fill bar-x" id="px-bar"></div></div></td></tr>
+                  <tr><td class="axis-label axis-y">Y</td><td class="axis-value" id="py">--</td><td class="axis-unit">mm</td>
+                      <td class="axis-bar-cell"><div class="axis-bar"><div class="axis-bar-fill bar-y" id="py-bar"></div></div></td></tr>
+                  <tr><td class="axis-label axis-z">Z</td><td class="axis-value" id="pz">--</td><td class="axis-unit">mm</td>
+                      <td class="axis-bar-cell"><div class="axis-bar"><div class="axis-bar-fill bar-z" id="pz-bar"></div></div></td></tr>
+                  <tr><td class="axis-label axis-rx">RX</td><td class="axis-value" id="prx">--</td><td class="axis-unit">&deg;</td>
+                      <td class="axis-bar-cell"><div class="axis-bar"><div class="axis-bar-fill bar-rx" id="prx-bar"></div></div></td></tr>
+                  <tr><td class="axis-label axis-ry">RY</td><td class="axis-value" id="pry">--</td><td class="axis-unit">&deg;</td>
+                      <td class="axis-bar-cell"><div class="axis-bar"><div class="axis-bar-fill bar-ry" id="pry-bar"></div></div></td></tr>
+                  <tr><td class="axis-label axis-rz">RZ</td><td class="axis-value" id="prz">--</td><td class="axis-unit">&deg;</td>
+                      <td class="axis-bar-cell"><div class="axis-bar"><div class="axis-bar-fill bar-rz" id="prz-bar"></div></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Jog Controls -->
+      <div class="card mb-2">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-arrows-move"></i> Jog Controls</span>
+          <div class="d-flex align-items-center gap-2">
+            <div class="btn-group btn-group-sm" role="group">
+              <input type="radio" class="btn-check" name="jogCoordMode" id="jogModeUser" value="user" checked>
+              <label class="btn btn-outline-info btn-xs" for="jogModeUser">User</label>
+              <input type="radio" class="btn-check" name="jogCoordMode" id="jogModeTool" value="tool">
+              <label class="btn btn-outline-info btn-xs" for="jogModeTool">Tool</label>
+            </div>
+          </div>
+        </div>
+        <div class="card-body py-2">
+          <!-- Step Size & Speed -->
+          <div class="row g-2 mb-2">
+            <div class="col-sm-4">
+              <label class="form-label form-label-sm mb-0">Linear Step (mm)</label>
+              <div class="btn-group btn-group-sm w-100" role="group">
+                <button class="btn btn-outline-secondary step-btn" data-step="1" data-type="linear">1</button>
+                <button class="btn btn-outline-secondary step-btn active" data-step="5" data-type="linear">5</button>
+                <button class="btn btn-outline-secondary step-btn" data-step="10" data-type="linear">10</button>
+                <button class="btn btn-outline-secondary step-btn" data-step="25" data-type="linear">25</button>
+                <button class="btn btn-outline-secondary step-btn" data-step="50" data-type="linear">50</button>
+              </div>
+            </div>
+            <div class="col-sm-4">
+              <label class="form-label form-label-sm mb-0">Angular Step (&deg;)</label>
+              <div class="btn-group btn-group-sm w-100" role="group">
+                <button class="btn btn-outline-secondary step-btn" data-step="1" data-type="angular">1</button>
+                <button class="btn btn-outline-secondary step-btn active" data-step="5" data-type="angular">5</button>
+                <button class="btn btn-outline-secondary step-btn" data-step="10" data-type="angular">10</button>
+                <button class="btn btn-outline-secondary step-btn" data-step="25" data-type="angular">25</button>
+                <button class="btn btn-outline-secondary step-btn" data-step="45" data-type="angular">45</button>
+              </div>
+            </div>
+            <div class="col-sm-4">
+              <label class="form-label form-label-sm mb-0">Speed: <span id="jog-speed-label">50</span>%</label>
+              <input type="range" class="form-range form-range-sm" id="jog-speed" min="1" max="100" value="50">
+            </div>
+          </div>
+
+          <div class="row g-2">
+            <!-- Cartesian Jog -->
+            <div class="col-md-6">
+              <h6 class="section-label">Cartesian</h6>
+              <div class="jog-grid">
+                <div class="jog-row">
+                  <span class="jog-axis axis-x">X</span>
+                  <button class="btn btn-sm btn-outline-danger jog-btn" data-axis="x" data-dir="-1"><i class="bi bi-dash-lg"></i></button>
+                  <button class="btn btn-sm btn-outline-success jog-btn" data-axis="x" data-dir="1"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="jog-row">
+                  <span class="jog-axis axis-y">Y</span>
+                  <button class="btn btn-sm btn-outline-danger jog-btn" data-axis="y" data-dir="-1"><i class="bi bi-dash-lg"></i></button>
+                  <button class="btn btn-sm btn-outline-success jog-btn" data-axis="y" data-dir="1"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="jog-row">
+                  <span class="jog-axis axis-z">Z</span>
+                  <button class="btn btn-sm btn-outline-danger jog-btn" data-axis="z" data-dir="-1"><i class="bi bi-dash-lg"></i></button>
+                  <button class="btn btn-sm btn-outline-success jog-btn" data-axis="z" data-dir="1"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="jog-row">
+                  <span class="jog-axis axis-rx">RX</span>
+                  <button class="btn btn-sm btn-outline-danger jog-btn" data-axis="rx" data-dir="-1"><i class="bi bi-dash-lg"></i></button>
+                  <button class="btn btn-sm btn-outline-success jog-btn" data-axis="rx" data-dir="1"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="jog-row">
+                  <span class="jog-axis axis-ry">RY</span>
+                  <button class="btn btn-sm btn-outline-danger jog-btn" data-axis="ry" data-dir="-1"><i class="bi bi-dash-lg"></i></button>
+                  <button class="btn btn-sm btn-outline-success jog-btn" data-axis="ry" data-dir="1"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="jog-row">
+                  <span class="jog-axis axis-rz">RZ</span>
+                  <button class="btn btn-sm btn-outline-danger jog-btn" data-axis="rz" data-dir="-1"><i class="bi bi-dash-lg"></i></button>
+                  <button class="btn btn-sm btn-outline-success jog-btn" data-axis="rz" data-dir="1"><i class="bi bi-plus-lg"></i></button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Joint Jog -->
+            <div class="col-md-6">
+              <h6 class="section-label">Joint</h6>
+              <div class="jog-grid">
+                <div class="jog-row">
+                  <span class="jog-axis">J1</span>
+                  <button class="btn btn-sm btn-outline-danger jog-btn" data-axis="j1" data-dir="-1"><i class="bi bi-dash-lg"></i></button>
+                  <button class="btn btn-sm btn-outline-success jog-btn" data-axis="j1" data-dir="1"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="jog-row">
+                  <span class="jog-axis">J2</span>
+                  <button class="btn btn-sm btn-outline-danger jog-btn" data-axis="j2" data-dir="-1"><i class="bi bi-dash-lg"></i></button>
+                  <button class="btn btn-sm btn-outline-success jog-btn" data-axis="j2" data-dir="1"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="jog-row">
+                  <span class="jog-axis">J3</span>
+                  <button class="btn btn-sm btn-outline-danger jog-btn" data-axis="j3" data-dir="-1"><i class="bi bi-dash-lg"></i></button>
+                  <button class="btn btn-sm btn-outline-success jog-btn" data-axis="j3" data-dir="1"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="jog-row">
+                  <span class="jog-axis">J4</span>
+                  <button class="btn btn-sm btn-outline-danger jog-btn" data-axis="j4" data-dir="-1"><i class="bi bi-dash-lg"></i></button>
+                  <button class="btn btn-sm btn-outline-success jog-btn" data-axis="j4" data-dir="1"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="jog-row">
+                  <span class="jog-axis">J5</span>
+                  <button class="btn btn-sm btn-outline-danger jog-btn" data-axis="j5" data-dir="-1"><i class="bi bi-dash-lg"></i></button>
+                  <button class="btn btn-sm btn-outline-success jog-btn" data-axis="j5" data-dir="1"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="jog-row">
+                  <span class="jog-axis">J6</span>
+                  <button class="btn btn-sm btn-outline-danger jog-btn" data-axis="j6" data-dir="-1"><i class="bi bi-dash-lg"></i></button>
+                  <button class="btn btn-sm btn-outline-success jog-btn" data-axis="j6" data-dir="1"><i class="bi bi-plus-lg"></i></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity Log -->
+      <div class="card mb-2">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-terminal"></i> Activity Log</span>
+          <button class="btn btn-outline-secondary btn-xs" id="btn-clear-log">Clear</button>
+        </div>
+        <div class="card-body p-0">
+          <div id="activity-log" class="activity-log"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ════ Right Column ════ -->
+    <div class="col-lg-4">
+
+      <!-- Robot Control -->
+      <div class="card mb-2">
+        <div class="card-header">
+          <i class="bi bi-power"></i> Robot Control
+        </div>
+        <div class="card-body py-2">
+          <div class="d-flex gap-2 mb-2">
+            <button class="btn btn-success btn-sm flex-fill" id="btn-enable">
+              <i class="bi bi-play-fill"></i> Enable
+            </button>
+            <button class="btn btn-warning btn-sm flex-fill" id="btn-disable">
+              <i class="bi bi-pause-fill"></i> Disable
+            </button>
+          </div>
+          <div class="d-flex gap-2 mb-2">
+            <button class="btn btn-info btn-sm flex-fill" id="btn-clear-error">
+              <i class="bi bi-arrow-counterclockwise"></i> Clear Error
+            </button>
+            <button class="btn btn-danger btn-sm flex-fill" id="btn-stop">
+              <i class="bi bi-stop-fill"></i> STOP
+            </button>
+          </div>
+
+          <!-- Speed Factor -->
+          <div class="mt-2">
+            <label class="form-label form-label-sm mb-0">
+              Global Speed: <span id="speed-label" class="text-info">50</span>%
+            </label>
+            <input type="range" class="form-range" id="speed-slider" min="1" max="100" value="50">
+          </div>
+
+          <!-- Robot Info -->
+          <div class="mt-2">
+            <table class="table table-sm table-borderless mb-0 info-table">
+              <tr><td class="text-muted">Mode</td><td id="info-mode">--</td></tr>
+              <tr><td class="text-muted">Uptime</td><td id="info-uptime">--</td></tr>
+              <tr><td class="text-muted">Config</td><td id="info-config">--</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gripper Control -->
+      <div class="card mb-2">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-hand-index-thumb"></i> Gripper</span>
+          <span id="gripper-status-badge" class="badge bg-secondary">Not Init</span>
+        </div>
+        <div class="card-body py-2">
+          <div class="d-flex gap-2 mb-2">
+            <button class="btn btn-outline-info btn-sm flex-fill" id="btn-gripper-init">
+              <i class="bi bi-gear"></i> Init
+            </button>
+            <button class="btn btn-outline-success btn-sm flex-fill" id="btn-gripper-open">
+              <i class="bi bi-arrows-expand"></i> Open
+            </button>
+            <button class="btn btn-outline-warning btn-sm flex-fill" id="btn-gripper-close">
+              <i class="bi bi-arrows-collapse"></i> Close
+            </button>
+          </div>
+
+          <!-- Gripper Position -->
+          <div class="mb-2">
+            <label class="form-label form-label-sm mb-0">
+              Position: <span id="gripper-pos-label">--</span> / 1000
+            </label>
+            <input type="range" class="form-range" id="gripper-pos-slider" min="0" max="1000" value="500">
+            <div class="d-flex justify-content-between">
+              <small class="text-muted">Closed</small>
+              <small class="text-muted">Open</small>
+            </div>
+          </div>
+
+          <!-- Gripper Position Display -->
+          <div class="gripper-visual mb-2">
+            <div class="gripper-bar">
+              <div class="gripper-bar-fill" id="gripper-bar-fill"></div>
+            </div>
+            <div class="d-flex justify-content-between">
+              <small class="text-muted">0</small>
+              <small class="text-info" id="gripper-current-pos">--</small>
+              <small class="text-muted">1000</small>
+            </div>
+          </div>
+
+          <!-- Force & Speed -->
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label form-label-sm mb-0">
+                Force: <span id="gripper-force-label">50</span>%
+              </label>
+              <input type="range" class="form-range form-range-sm" id="gripper-force" min="20" max="100" value="50">
+            </div>
+            <div class="col-6">
+              <label class="form-label form-label-sm mb-0">
+                Speed: <span id="gripper-speed-label">50</span>%
+              </label>
+              <input type="range" class="form-range form-range-sm" id="gripper-speed" min="1" max="100" value="50">
+            </div>
+          </div>
+
+          <!-- Move button -->
+          <button class="btn btn-outline-primary btn-sm w-100 mt-2" id="btn-gripper-move">
+            <i class="bi bi-arrow-right"></i> Move to Position
+          </button>
+
+          <!-- Gripper State -->
+          <table class="table table-sm table-borderless mb-0 mt-2 info-table">
+            <tr><td class="text-muted">State</td><td id="gripper-state-text">--</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <!-- Configuration -->
+      <div class="card mb-2">
+        <div class="card-header" data-bs-toggle="collapse" data-bs-target="#config-panel" role="button">
+          <i class="bi bi-sliders"></i> Configuration
+          <i class="bi bi-chevron-down float-end panel-chevron"></i>
+        </div>
+        <div class="collapse show" id="config-panel">
+          <div class="card-body py-2">
+            <table class="table table-sm table-borderless mb-0 info-table">
+              <tr><td class="text-muted">Robot IP</td><td id="cfg-robot-ip">--</td></tr>
+              <tr><td class="text-muted">Namespace</td><td id="cfg-namespace">--</td></tr>
+              <tr><td class="text-muted">Timeout</td><td id="cfg-timeout">--</td></tr>
+              <tr><td class="text-muted">Jog Distance</td><td id="cfg-jog-dist">--</td></tr>
+              <tr><td class="text-muted">Jog Rotation</td><td id="cfg-jog-rot">--</td></tr>
+              <tr><td class="text-muted">Jog Mode</td><td id="cfg-jog-mode">--</td></tr>
+              <tr><td class="text-muted">Sync Mode</td><td id="cfg-sync">--</td></tr>
+              <tr><td class="text-muted">Tolerance (deg)</td><td id="cfg-tol-deg">--</td></tr>
+              <tr><td class="text-muted">Tolerance (mm)</td><td id="cfg-tol-mm">--</td></tr>
+              <tr><td class="text-muted">Motion Timeout</td><td id="cfg-motion-timeout">--</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Keyboard Shortcuts -->
+      <div class="card mb-2">
+        <div class="card-header" data-bs-toggle="collapse" data-bs-target="#keyboard-panel" role="button">
+          <i class="bi bi-keyboard"></i> Keyboard Shortcuts
+          <i class="bi bi-chevron-down float-end panel-chevron"></i>
+        </div>
+        <div class="collapse" id="keyboard-panel">
+          <div class="card-body py-2">
+            <table class="table table-sm table-borderless mb-0 info-table">
+              <tr><td><kbd>W</kbd>/<kbd>S</kbd></td><td>Y +/-</td></tr>
+              <tr><td><kbd>A</kbd>/<kbd>D</kbd></td><td>X -/+</td></tr>
+              <tr><td><kbd>Q</kbd>/<kbd>E</kbd></td><td>Z -/+</td></tr>
+              <tr><td><kbd>Space</kbd></td><td>STOP</td></tr>
+              <tr><td><kbd>G</kbd></td><td>Toggle gripper</td></tr>
+              <tr><td><kbd>1</kbd>-<kbd>5</kbd></td><td>Linear step size</td></tr>
+              <tr><td><kbd>Shift+1</kbd>-<kbd>5</kbd></td><td>Angular step size</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/static/js/app.js"></script>
+<script type="module" src="/static/js/robot3d.js"></script>
+
+</body>
+</html>

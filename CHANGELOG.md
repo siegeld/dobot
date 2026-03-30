@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Web dashboard** at http://localhost:7070 — browser-based robot control with real-time WebSocket state updates (5Hz)
+- **`startup.sh`** — single command to bring up driver + web dashboard
+  - `./startup.sh` — start system
+  - `./startup.sh --build` — rebuild image first
+  - `./startup.sh --stop` — stop everything
+- **Auto-reconnect** — driver and web services use `restart: unless-stopped`; driver auto-connects when robot powers on and recovers from reboots
+- Web dashboard runs independently of driver, showing disconnected state until robot is available
+
 ## [0.0.1] - 2025-11-22
 
 ### Added

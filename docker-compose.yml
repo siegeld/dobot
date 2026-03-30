@@ -26,6 +26,7 @@ services:
   # Driver service - connects to robot and exposes ROS2 services
   dobot-driver:
     extends: dobot
+    restart: unless-stopped
     environment:
       - IP_address=${ROBOT_IP:-192.168.5.1}
       - DOBOT_TYPE=${ROBOT_TYPE:-cr5}
@@ -38,3 +39,11 @@ services:
     command: dobot-ros
     depends_on:
       - dobot-driver
+
+  # Web dashboard - browser-based robot control
+  dobot-web:
+    extends: dobot
+    restart: unless-stopped
+    command: dobot-ros web --port 7070
+    ports:
+      - "7070:7070"

@@ -1,0 +1,348 @@
+/* Dobot CR5 Dashboard — Dark theme matching RealSense D555 */
+
+:root {
+  --db-bg: #0d1117;
+  --db-card: #161b22;
+  --db-border: #30363d;
+  --db-accent: #58a6ff;
+  --db-success: #3fb950;
+  --db-warning: #d29922;
+  --db-danger: #f85149;
+  --db-text: #c9d1d9;
+  --db-muted: #8b949e;
+  --db-card-header: rgba(88, 166, 255, 0.05);
+}
+
+/* ── Base ────────────────────────────────────────────────── */
+
+body {
+  background: var(--db-bg);
+  color: var(--db-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-size: 0.9rem;
+}
+
+/* ── Scrollbars ──────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--db-bg); }
+::-webkit-scrollbar-thumb { background: var(--db-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--db-muted); }
+
+/* ── Navbar ──────────────────────────────────────────────── */
+
+.navbar {
+  background: var(--db-card) !important;
+  border-bottom: 1px solid var(--db-border);
+  padding: 0.4rem 1rem;
+}
+
+.navbar-brand {
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: var(--db-accent) !important;
+}
+
+.navbar-brand i { font-size: 1.3rem; }
+
+/* ── Status Badges ───────────────────────────────────────── */
+
+.status-badge {
+  padding: 0.25em 0.65em;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+}
+
+.status-badge i { font-size: 0.5rem; }
+
+.badge-connected {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--db-success);
+  border: 1px solid rgba(63, 185, 80, 0.3);
+}
+
+.badge-disconnected {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--db-danger);
+  border: 1px solid rgba(248, 81, 73, 0.3);
+}
+
+.badge-error {
+  background: rgba(210, 153, 34, 0.15);
+  color: var(--db-warning);
+  border: 1px solid rgba(210, 153, 34, 0.3);
+}
+
+/* ── Cards ───────────────────────────────────────────────── */
+
+.card {
+  background: var(--db-card);
+  border: 1px solid var(--db-border);
+  border-radius: 6px;
+}
+
+.card-header {
+  background: var(--db-card-header);
+  border-bottom: 1px solid var(--db-border);
+  padding: 0.5rem 0.75rem;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+
+.card-header i:first-child { margin-right: 0.35em; color: var(--db-accent); }
+
+.card-body { padding: 0.75rem; }
+
+/* Collapsible panels */
+.card-header[data-bs-toggle] { cursor: pointer; }
+.card-header[data-bs-toggle]:hover { background: rgba(88, 166, 255, 0.08); }
+.panel-chevron { transition: transform 0.2s; }
+.collapsed .panel-chevron { transform: rotate(-90deg); }
+
+/* ── Section Labels ──────────────────────────────────────── */
+
+.section-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--db-muted);
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+}
+
+/* ── Position Display ────────────────────────────────────── */
+
+.position-table td { padding: 0.15rem 0.35rem; vertical-align: middle; }
+
+.axis-label {
+  font-weight: 700;
+  font-size: 0.8rem;
+  width: 2rem;
+  color: var(--db-accent);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.axis-value {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.85rem;
+  text-align: right;
+  min-width: 5.5rem;
+  color: var(--db-text);
+}
+
+.axis-unit {
+  font-size: 0.7rem;
+  color: var(--db-muted);
+  width: 1.5rem;
+}
+
+.axis-bar-cell { width: 40%; }
+
+.axis-bar {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.axis-bar-fill {
+  height: 100%;
+  background: var(--db-accent);
+  border-radius: 3px;
+  transition: width 0.15s ease;
+  width: 50%;
+}
+
+/* Cartesian axis colors */
+.axis-x { color: #f85149 !important; }
+.axis-y { color: #3fb950 !important; }
+.axis-z { color: #58a6ff !important; }
+.axis-rx { color: #f0883e !important; }
+.axis-ry { color: #a371f7 !important; }
+.axis-rz { color: #56d4dd !important; }
+
+.bar-x { background: #f85149; }
+.bar-y { background: #3fb950; }
+.bar-z { background: #58a6ff; }
+.bar-rx { background: #f0883e; }
+.bar-ry { background: #a371f7; }
+.bar-rz { background: #56d4dd; }
+
+/* ── Jog Controls ────────────────────────────────────────── */
+
+.jog-grid { display: flex; flex-direction: column; gap: 0.3rem; }
+
+.jog-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.jog-axis {
+  font-weight: 700;
+  font-size: 0.8rem;
+  width: 2rem;
+  text-align: center;
+  color: var(--db-accent);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.jog-btn {
+  width: 3rem;
+  padding: 0.2rem 0;
+  font-size: 0.9rem;
+}
+
+.jog-btn:active { transform: scale(0.95); }
+
+.jog-btn.is-loading {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.step-btn.active {
+  background: var(--db-accent) !important;
+  border-color: var(--db-accent) !important;
+  color: #000 !important;
+}
+
+.btn-xs {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+/* ── Gripper ─────────────────────────────────────────────── */
+
+.gripper-visual { padding: 0.25rem 0; }
+
+.gripper-bar {
+  height: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+}
+
+.gripper-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--db-warning), var(--db-success));
+  border-radius: 6px;
+  transition: width 0.2s ease;
+  width: 50%;
+}
+
+/* ── Info Table ───────────────────────────────────────────── */
+
+.info-table td {
+  padding: 0.15rem 0.35rem;
+  font-size: 0.8rem;
+  border: none;
+}
+
+.info-table td:first-child { width: 40%; }
+
+/* ── Activity Log ────────────────────────────────────────── */
+
+.activity-log {
+  max-height: 180px;
+  overflow-y: auto;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: #0a0e14;
+}
+
+.log-entry {
+  padding: 0.1rem 0;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.3);
+  display: flex;
+  gap: 0.5rem;
+}
+
+.log-time { color: var(--db-muted); white-space: nowrap; }
+.log-msg { color: var(--db-text); }
+.log-entry.log-success .log-msg { color: var(--db-success); }
+.log-entry.log-error .log-msg { color: var(--db-danger); }
+.log-entry.log-info .log-msg { color: var(--db-accent); }
+.log-entry.log-warning .log-msg { color: var(--db-warning); }
+
+/* ── Form Controls ───────────────────────────────────────── */
+
+.form-range { accent-color: var(--db-accent); }
+
+.form-label-sm { font-size: 0.78rem; color: var(--db-muted); }
+
+.form-range-sm { height: 1rem; }
+
+.form-control-sm, .form-select-sm {
+  background: var(--db-bg);
+  border-color: var(--db-border);
+  font-size: 0.8rem;
+}
+
+.form-control-sm:focus, .form-select-sm:focus {
+  border-color: var(--db-accent);
+  box-shadow: 0 0 0 0.2rem rgba(88, 166, 255, 0.25);
+}
+
+.form-check-input:checked {
+  background-color: var(--db-accent);
+  border-color: var(--db-accent);
+}
+
+/* ── Kbd ─────────────────────────────────────────────────── */
+
+kbd {
+  background: rgba(110, 118, 129, 0.2);
+  border: 1px solid var(--db-border);
+  border-radius: 4px;
+  padding: 0.1em 0.4em;
+  font-size: 0.8em;
+  color: var(--db-text);
+}
+
+/* ── Toast ────────────────────────────────────────────────── */
+
+.toast {
+  background: var(--db-card);
+  border: 1px solid var(--db-border);
+}
+
+/* ── STOP Button ─────────────────────────────────────────── */
+
+#btn-stop {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+#btn-stop:hover {
+  background: var(--db-danger);
+  color: #fff;
+  box-shadow: 0 0 15px rgba(248, 81, 73, 0.4);
+}
+
+/* ── 3D Robot Viewer ─────────────────────────────────────── */
+
+#robot-3d-container {
+  width: 100%;
+  height: 400px;
+  overflow: hidden;
+  border-radius: 0 0 5px 5px;
+}
+
+#robot-3d-container canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* ── Responsive ──────────────────────────────────────────── */
+
+@media (max-width: 991.98px) {
+  .card-body { padding: 0.5rem; }
+  .jog-btn { width: 2.5rem; }
+}

@@ -299,13 +299,20 @@ vim .env                    # Set ROBOT_IP and ROBOT_TYPE
 # Build (first time only, ~15 min)
 docker compose build
 
-# Terminal 1: Start ROS2 driver
-./dobot-driver.sh
+# Start the system (driver + web dashboard)
+./startup.sh
+```
 
-# Terminal 2: Use CLI
+The driver auto-connects when the robot powers on and auto-reconnects if the robot reboots. The web dashboard is available at http://localhost:7070 and works independently — it shows a disconnected state until the driver connects.
+
+```bash
+# CLI commands (while system is running)
 ./dobot-shell.sh            # Interactive shell
 ./dobot.sh position         # One-shot command
 ./dobot.sh jog x 10         # Jog +10mm in X
+
+# Stop everything
+./startup.sh --stop
 ```
 
 Code changes to `dobot-ros/` take effect immediately (volume-mounted, no rebuild).
@@ -364,7 +371,8 @@ dobot/
 ├── TCP-IP-Python-V4/      # Vendor TCP/IP SDK
 ├── docker/                # Dockerfile, entrypoint, FastRTPS config
 ├── docker-compose.yml     # Docker services
-├── dobot-driver.sh        # Start ROS2 driver
+├── startup.sh             # Start system (driver + web dashboard)
+├── dobot-driver.sh        # Start ROS2 driver only
 ├── dobot-shell.sh         # Start ROS2 interactive shell
 ├── dobot.sh               # Run ROS2 CLI commands
 ├── dobot-cr.sh            # Run direct TCP/IP CLI
@@ -486,7 +494,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [ ] Add digital I/O control
 - [ ] Add trajectory recording/playback
 - [ ] Add safety monitoring
-- [ ] Add web-based dashboard
+- [x] Add web-based dashboard (http://localhost:7070)
 - [x] Add ROS 2 integration
 
 ---

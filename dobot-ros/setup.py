@@ -11,12 +11,22 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/config', ['config/dobot_config.yaml']),
     ],
+    package_data={
+        'dobot_ros': [
+            'web/static/**/*',
+            'web/static/css/*.css',
+            'web/static/js/*.js',
+        ],
+    },
+    include_package_data=True,
     install_requires=[
         'setuptools',
         'click>=8.0.0',
         'rich>=10.0.0',
         'pyyaml>=5.4.0',
         'prompt_toolkit>=3.0.0',
+        'fastapi>=0.100.0',
+        'uvicorn[standard]>=0.20.0',
     ],
     zip_safe=True,
     maintainer='User',

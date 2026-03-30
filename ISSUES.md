@@ -55,8 +55,8 @@ Breaks if the package is installed from a different location. Consider adding th
 ### 12. Dual dependency declarations
 Both `requirements.txt` and `pyproject.toml` declare dependencies — potential for drift.
 
-### 13. Stale roadmap
-`README.md` roadmap lists "ROS 2 integration" as TODO, but it already exists in `dobot-ros/` and `dobot_actions/`.
+### ~~13. Stale roadmap~~ (FIXED)
+Updated: "ROS 2 integration" and "web-based dashboard" now marked as complete in README.md roadmap.
 
 ### 14. No py.typed marker
 No `py.typed` file for downstream mypy consumers.

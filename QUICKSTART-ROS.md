@@ -23,19 +23,21 @@ docker compose build
 This takes ~15 minutes the first time. Subsequent rebuilds are fast due to layer caching.
 Code changes to `dobot-ros/` are picked up automatically via volume mount — no rebuild needed.
 
-## 3. Start Driver
-
-In Terminal 1:
+## 3. Start the System
 
 ```bash
-./dobot-driver.sh
+./startup.sh
 ```
 
-Keep this running. You should see ROS2 connection messages.
+This starts both the ROS2 driver and the web dashboard. The driver auto-connects when the robot powers on and auto-reconnects if the robot reboots.
+
+- **Web dashboard:** http://localhost:7070 (available immediately, shows disconnected until robot is up)
+- **Stop everything:** `./startup.sh --stop`
+- **Rebuild first:** `./startup.sh --build`
 
 ## 4. Use the CLI
 
-In Terminal 2:
+In another terminal:
 
 ```bash
 # Interactive shell (recommended)
@@ -71,7 +73,7 @@ In Terminal 2:
 
 ## Troubleshooting
 
-**"Service not available"** - Driver not running. Start `./dobot-driver.sh` first.
+**"Service not available"** - Driver not running. Start `./startup.sh` first (or `./dobot-driver.sh` for driver only).
 
 **Robot not moving** - Run `enable` then `clear` to enable and clear errors.
 

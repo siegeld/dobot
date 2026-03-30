@@ -49,17 +49,22 @@ ROBOT_IP=192.168.5.1
 ROBOT_TYPE=cr5  # cr3, cr5, cr7, cr10, cr12, cr16, cr20
 ```
 
-### Usage with Helper Scripts
-
-**Terminal 1: Start the ROS2 Driver**
+### Start the System
 
 ```bash
-./dobot-driver.sh
+./startup.sh
 ```
 
-You should see connection messages. Keep this terminal running.
+This starts both the ROS2 driver and the web dashboard in Docker. Both services use `restart: unless-stopped` — the driver auto-connects when the robot powers on and auto-reconnects if the robot reboots. The web dashboard at http://localhost:7070 runs independently and shows a disconnected state until the driver connects.
 
-**Terminal 2: Use the CLI**
+```bash
+./startup.sh --build    # Rebuild image first, then start
+./startup.sh --stop     # Stop everything
+```
+
+### Use the CLI
+
+In another terminal:
 
 ```bash
 # Start interactive shell
@@ -107,8 +112,9 @@ dobot-ros position
 | Command | Description |
 |---------|-------------|
 | `docker compose build dobot` | Build the image |
-| `docker compose up dobot-driver` | Start ROS2 driver (foreground) |
-| `docker compose up -d dobot-driver` | Start driver (background) |
+| `./startup.sh` | Start driver + web dashboard |
+| `./startup.sh --stop` | Stop all services |
+| `docker compose up -d dobot-driver` | Start driver only (background) |
 | `docker compose run --rm dobot dobot-ros` | Run CLI |
 | `docker compose run --rm dobot bash` | Interactive shell |
 | `docker compose down` | Stop all services |
@@ -398,6 +404,8 @@ The ROS2 driver is not running.
 
 **Docker:**
 ```bash
+./startup.sh              # Start driver + web dashboard
+# or driver only:
 docker compose up dobot-driver
 ```
 

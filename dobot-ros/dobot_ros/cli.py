@@ -819,6 +819,18 @@ def calibrate_test(ctx: click.Context, px: int, py: int, camera_url: str) -> Non
         print_error(f"Calibration accuracy: {error:.1f}mm — poor, recalibrate")
 
 
+@cli.command()
+@click.option("--host", default="0.0.0.0", help="Host to bind to")
+@click.option("--port", "-p", default=8080, type=int, help="Port to serve on")
+@click.pass_context
+def web(ctx: click.Context, host: str, port: int) -> None:
+    """Start the web dashboard for browser-based robot control."""
+    config: Config = ctx.obj["config"]
+    print_info(f"Starting web dashboard on http://{host}:{port}")
+    from dobot_ros.web.server import start_server
+    start_server(config, host=host, port=port)
+
+
 def main() -> None:
     """Entry point for the CLI."""
     try:

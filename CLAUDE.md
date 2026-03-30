@@ -15,16 +15,25 @@ The active development focus is the ROS2 path.
 - **dobot-ros CLI** lives at `dobot-ros/dobot_ros/` — volume-mounted into Docker, so code edits take effect without rebuild
 - **DDS transport**: FastRTPS with UDP-only profile (`docker/fastrtps_profile.xml`) is required for cross-container ROS2 communication. Without it, service discovery works but data exchange fails (shared memory transport broken between containers).
 
+## System Startup
+
+- `./startup.sh` — starts the full system (driver + web dashboard)
+- `./startup.sh --build` — rebuild Docker image first, then start
+- `./startup.sh --stop` — stop everything (`docker compose down`)
+- Both services use `restart: unless-stopped` — the driver auto-reconnects when the robot powers on, and recovers if the robot reboots
+- The web dashboard runs independently of the driver; it shows a disconnected state until the driver connects to the robot
+- Web dashboard: http://localhost:7070
+
 ## Development Workflow
 
 - Edit `dobot-ros/` code on host → changes are live in next `docker compose run` (no rebuild)
 - Rebuild only needed when changing: `dobot_actions/`, `DOBOT_6Axis_ROS2_V4/`, or `docker/Dockerfile`
 - `docker compose build` — rebuild image
-- `docker compose up dobot-driver` — start ROS2 driver (keep running)
 - `docker compose run --rm dobot dobot-ros <cmd>` — run CLI commands
 
 ## Key Files
 
+- `startup.sh` — system startup script (driver + web dashboard)
 - `docker-compose.yml` — service definitions, volume mounts, FastRTPS profile
 - `docker/Dockerfile` — ROS2 image build (Jazzy LTS)
 - `docker/entrypoint.sh` — sources ROS2, sets PYTHONPATH for volume-mounted code
@@ -33,6 +42,7 @@ The active development focus is the ROS2 path.
 - `dobot-ros/dobot_ros/ros_client.py` — ROS2 service client (all robot + gripper API)
 - `dobot-ros/dobot_ros/shell.py` — interactive shell (REPL)
 - `dobot-ros/dobot_ros/cli.py` — click-based CLI commands
+- `dobot-ros/dobot_ros/web/` — FastAPI web dashboard (WebSocket state push at 5Hz)
 
 ## Gripper
 
