@@ -568,6 +568,257 @@ def _print_grip_result(state: int) -> None:
         print_info(msg)
 
 
+# --- Vision / Pick Commands ---
+
+
+@cli.command()
+@click.option("--object-id", "-id", type=int, default=None, help="Object ID to pick (default: largest)")
+@click.option("--camera-url", default="http://10.11.6.65:8080", help="Camera server URL")
+@click.pass_context
+def pick(ctx: click.Context, object_id: Optional[int], camera_url: str) -> None:
+    """Pick up an object detected by the camera."""
+    from dobot_ros.vision import VisionClient
+    from dobot_ros.pick import PickExecutor, PickConfig
+
+    config = ctx.obj.get("config", Config())
+    client = _create_client(config)
+    vision = VisionClient(base_url=camera_url)
+
+    if not vision.is_connected():
+        print_error(f"Camera server not reachable at {camera_url}")
+        return
+
+    cal = vision.get_calibration_status()
+    if not cal.get("solved"):
+        print_error("Camera not calibrated. Run 'dobot-ros calibrate' first.")
+        return
+
+    executor = PickExecutor(client, vision)
+    success = executor.pick(object_id=object_id, log_callback=lambda m: print_info(m))
+
+    if success:
+        print_success("Pick completed")
+    else:
+        print_error("Pick failed")
+
+
+@cli.command()
+@click.option("--camera-url", default="http://10.11.6.65:8080", help="Camera server URL")
+@click.pass_context
+def scan(ctx: click.Context, camera_url: str) -> None:
+    """Show objects detected by the camera."""
+    from dobot_ros.vision import VisionClient
+
+    vision = VisionClient(base_url=camera_url)
+    if not vision.is_connected():
+        print_error(f"Camera not reachable at {camera_url}")
+        return
+
+    objects = vision.get_objects()
+    if not objects:
+        print_info("No objects detected")
+        return
+
+    table = Table(title="Detected Objects", box=box.ROUNDED)
+    table.add_column("ID", style="cyan")
+    table.add_column("Position (m)", style="green")
+    table.add_column("Depth", style="yellow")
+    table.add_column("Rotation", style="magenta")
+    table.add_column("Area", style="dim")
+    table.add_column("Tracked", style="dim")
+
+    for obj in objects:
+        pos = f"({obj.position_3d[0]:.3f}, {obj.position_3d[1]:.3f}, {obj.position_3d[2]:.3f})"
+        table.add_row(
+            f"#{obj.id}",
+            pos,
+            f"{obj.depth_mean:.3f}m",
+            f"{obj.rotation_deg:.0f}°",
+            str(obj.area_px),
+            str(obj.frames_tracked),
+        )
+
+    console.print(table)
+
+    cal = vision.get_calibration_status()
+    if cal.get("solved"):
+        console.print(f"\n[dim]Calibration: solved ({cal['num_points']} pts, err={cal['error_mm']:.1f}mm)[/dim]")
+    else:
+        console.print(f"\n[yellow]Calibration: NOT solved ({cal['num_points']} pts)[/yellow]")
+
+
+@cli.group()
+def calibrate():
+    """Camera-to-robot calibration commands."""
+    pass
+
+
+@calibrate.command("record")
+@click.option("--camera-url", default="http://10.11.6.65:8080")
+@click.pass_context
+def calibrate_record(ctx: click.Context, camera_url: str) -> None:
+    """Record a calibration point at the robot's current position.
+
+    Move the robot TCP to a known point visible to the camera,
+    then run this command. It records the camera 3D position and
+    robot cartesian position as a correspondence pair.
+    """
+    from dobot_ros.vision import VisionClient
+
+    config = ctx.obj.get("config", Config())
+    client = _create_client(config)
+    vision = VisionClient(base_url=camera_url)
+
+    # Get robot position
+    robot_pose = client.get_cartesian_pose()
+    robot_xyz = robot_pose[:3]  # [X, Y, Z] in mm
+    print_info(f"Robot position: X={robot_xyz[0]:.1f} Y={robot_xyz[1]:.1f} Z={robot_xyz[2]:.1f} mm")
+
+    # Get camera position at the center of the frame (where the TCP should be visible)
+    # The user should have the TCP at a known point visible to the camera
+    # We'll use the depth query at the frame center, or let the user specify pixel coords
+    depth_data = vision.get_depth_at(320, 180)
+    camera_xyz = depth_data["position_3d"]
+    print_info(f"Camera position: x={camera_xyz[0]:.4f} y={camera_xyz[1]:.4f} z={camera_xyz[2]:.4f} m")
+
+    if depth_data["distance"] <= 0:
+        print_error("No depth at frame center. Move the robot TCP into view.")
+        return
+
+    result = vision.add_calibration_point(camera_xyz, robot_xyz)
+    print_success(f"Point recorded. Total: {result['total_points']} points")
+
+
+@calibrate.command("record-at")
+@click.argument("px", type=int)
+@click.argument("py", type=int)
+@click.option("--camera-url", default="http://10.11.6.65:8080")
+@click.pass_context
+def calibrate_record_at(ctx: click.Context, px: int, py: int, camera_url: str) -> None:
+    """Record a calibration point using a specific pixel coordinate.
+
+    Usage: dobot-ros calibrate record-at 310 270
+    """
+    from dobot_ros.vision import VisionClient
+
+    config = ctx.obj.get("config", Config())
+    client = _create_client(config)
+    vision = VisionClient(base_url=camera_url)
+
+    robot_pose = client.get_cartesian_pose()
+    robot_xyz = robot_pose[:3]
+    print_info(f"Robot: X={robot_xyz[0]:.1f} Y={robot_xyz[1]:.1f} Z={robot_xyz[2]:.1f} mm")
+
+    depth_data = vision.get_depth_at(px, py)
+    camera_xyz = depth_data["position_3d"]
+    print_info(f"Camera at ({px},{py}): x={camera_xyz[0]:.4f} y={camera_xyz[1]:.4f} z={camera_xyz[2]:.4f} m")
+
+    if depth_data["distance"] <= 0:
+        print_error(f"No depth data at pixel ({px}, {py})")
+        return
+
+    result = vision.add_calibration_point(camera_xyz, robot_xyz)
+    print_success(f"Point recorded. Total: {result['total_points']} points")
+
+
+@calibrate.command("solve")
+@click.option("--camera-url", default="http://10.11.6.65:8080")
+def calibrate_solve(camera_url: str) -> None:
+    """Solve the camera-to-robot transform from recorded points."""
+    from dobot_ros.vision import VisionClient
+
+    vision = VisionClient(base_url=camera_url)
+    result = vision.solve_calibration()
+
+    if result.get("solved"):
+        print_success(f"Calibration solved! {result['num_points']} points, error={result['error_mm']:.1f}mm")
+    else:
+        print_error(f"Need at least 3 points (have {result['num_points']})")
+
+
+@calibrate.command("status")
+@click.option("--camera-url", default="http://10.11.6.65:8080")
+def calibrate_status(camera_url: str) -> None:
+    """Show calibration status and points."""
+    from dobot_ros.vision import VisionClient
+
+    vision = VisionClient(base_url=camera_url)
+    result = vision.get_calibration_status()
+
+    if result.get("solved"):
+        print_success(f"Solved: {result['num_points']} points, error={result['error_mm']:.1f}mm")
+    else:
+        print_info(f"Not solved. {result['num_points']} points recorded.")
+
+    for i, pt in enumerate(result.get("points", [])):
+        cam = pt["camera_xyz"]
+        rob = pt["robot_xyz"]
+        console.print(
+            f"  [{i+1}] camera=({cam[0]:.4f}, {cam[1]:.4f}, {cam[2]:.4f})m "
+            f"→ robot=({rob[0]:.1f}, {rob[1]:.1f}, {rob[2]:.1f})mm"
+        )
+
+
+@calibrate.command("clear")
+@click.option("--camera-url", default="http://10.11.6.65:8080")
+def calibrate_clear(camera_url: str) -> None:
+    """Clear all calibration points."""
+    from dobot_ros.vision import VisionClient
+
+    vision = VisionClient(base_url=camera_url)
+    vision.clear_calibration()
+    print_success("Calibration cleared")
+
+
+@calibrate.command("test")
+@click.argument("px", type=int)
+@click.argument("py", type=int)
+@click.option("--camera-url", default="http://10.11.6.65:8080")
+@click.pass_context
+def calibrate_test(ctx: click.Context, px: int, py: int, camera_url: str) -> None:
+    """Test calibration by comparing predicted vs actual robot position.
+
+    Move robot TCP to a point, then: dobot-ros calibrate test 310 270
+    """
+    from dobot_ros.vision import VisionClient
+
+    config = ctx.obj.get("config", Config())
+    client = _create_client(config)
+    vision = VisionClient(base_url=camera_url)
+
+    robot_pose = client.get_cartesian_pose()
+    actual_xyz = robot_pose[:3]
+
+    depth_data = vision.get_depth_at(px, py)
+    if depth_data["distance"] <= 0:
+        print_error(f"No depth at ({px}, {py})")
+        return
+
+    try:
+        predicted = vision.transform_to_robot(depth_data["position_3d"])
+    except Exception as e:
+        print_error(f"Transform failed: {e}")
+        return
+
+    pred = predicted
+    dx = pred["robot_xyz"][0] - actual_xyz[0]
+    dy = pred["robot_xyz"][1] - actual_xyz[1]
+    dz = pred["robot_xyz"][2] - actual_xyz[2]
+    import math
+    error = math.sqrt(dx*dx + dy*dy + dz*dz)
+
+    console.print(f"  Predicted: ({pred['robot_xyz'][0]:.1f}, {pred['robot_xyz'][1]:.1f}, {pred['robot_xyz'][2]:.1f})mm")
+    console.print(f"  Actual:    ({actual_xyz[0]:.1f}, {actual_xyz[1]:.1f}, {actual_xyz[2]:.1f})mm")
+    console.print(f"  Error:     {error:.1f}mm (dx={dx:.1f} dy={dy:.1f} dz={dz:.1f})")
+
+    if error < 5:
+        print_success(f"Calibration accuracy: {error:.1f}mm — excellent")
+    elif error < 15:
+        print_info(f"Calibration accuracy: {error:.1f}mm — acceptable")
+    else:
+        print_error(f"Calibration accuracy: {error:.1f}mm — poor, recalibrate")
+
+
 def main() -> None:
     """Entry point for the CLI."""
     try:
