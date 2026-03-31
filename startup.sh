@@ -57,8 +57,8 @@ fi
 docker compose down 2>/dev/null || true
 
 # ── Start ───────────────────────────────────────────────────
-info "Starting driver + web dashboard..."
-docker compose up -d dobot-driver dobot-web
+info "Starting driver + gripper + web dashboard..."
+docker compose up -d dobot-driver dobot-gripper dobot-web
 ok "Services starting (driver will auto-reconnect when robot is reachable)"
 
 echo ""

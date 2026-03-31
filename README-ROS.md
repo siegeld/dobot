@@ -268,7 +268,9 @@ Supports DH Robotics grippers (AG-95, PGE, RGD, PGC series) connected to the Dob
 
 ### How it Works
 
-The gripper communicates through the Dobot controller's **internal Modbus TCP gateway** at `127.0.0.1:60000`. This is the same path used by the DHGrip Dobot Studio plugin.
+The gripper communicates through the Dobot controller's **internal Modbus TCP gateway** at `127.0.0.1:60000`. This gateway is configured by the DHGrip Dobot Studio plugin.
+
+> **Note:** A robot power cycle resets this gateway. If gripper commands return -1, re-run the DHGrip plugin on the teach pendant (install → enable → uninstall) to restore port 60000.
 
 ```
 CLI / Action Server

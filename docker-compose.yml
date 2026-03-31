@@ -40,6 +40,14 @@ services:
     depends_on:
       - dobot-driver
 
+  # Gripper node - owns Modbus connection, publishes state, accepts commands
+  dobot-gripper:
+    extends: dobot
+    restart: unless-stopped
+    command: python3 /dobot-ros/dobot_ros/gripper_node.py
+    depends_on:
+      - dobot-driver
+
   # Web dashboard - browser-based robot control
   dobot-web:
     extends: dobot

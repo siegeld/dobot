@@ -54,15 +54,22 @@ def _get_client() -> DobotRosClient:
         _client = DobotRosClient(
             namespace=_config.ros_namespace if _config else '',
             service_timeout=_config.service_timeout if _config else 5.0,
+            subscribe_topics=True,
         )
     return _client
 
 
 def _poll_state():
-    """Poll robot state in a background thread."""
+    """Poll robot state in a background thread.
+
+    Robot state and gripper state come from ROS2 topic subscriptions
+    cached in the DobotRosClient. We call spin_once to process callbacks.
+    """
     while True:
         try:
             client = _get_client()
+            # Process topic subscription callbacks
+            rclpy.spin_once(client, timeout_sec=0)
             with _lock:
                 try:
                     angles = client.get_joint_angles()
@@ -77,30 +84,13 @@ def _poll_state():
                 except Exception as e:
                     _state["connected"] = False
                     _state["error"] = str(e)
+                # Gripper state from /gripper/state topic (no Modbus)
+                _state["gripper_position"] = client.gripper_get_position()
+                _state["gripper_state"] = client.gripper_get_state()
+                _state["gripper_initialized"] = client.gripper_get_init_status() == 1
         except Exception:
             _state["connected"] = False
         time.sleep(0.2)  # 5 Hz
-
-
-def _poll_gripper():
-    """Poll gripper state at lower rate."""
-    while True:
-        try:
-            client = _get_client()
-            if client._gripper_modbus_index >= 0:
-                with _lock:
-                    try:
-                        pos = client.gripper_get_position()
-                        state = client.gripper_get_state()
-                        init = client.gripper_get_init_status()
-                        _state["gripper_position"] = pos if pos is not None else -1
-                        _state["gripper_state"] = state if state is not None else -1
-                        _state["gripper_initialized"] = init == 1
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-        time.sleep(0.5)
 
 
 # ── Lifespan ────────────────────────────────────────────────────
@@ -108,11 +98,9 @@ def _poll_gripper():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _state["uptime_start"] = time.time()
-    # Start background polling threads
+    # Start background polling thread (handles robot + gripper state via topics)
     t1 = threading.Thread(target=_poll_state, daemon=True)
     t1.start()
-    t2 = threading.Thread(target=_poll_gripper, daemon=True)
-    t2.start()
     yield
     # Cleanup
     global _client
