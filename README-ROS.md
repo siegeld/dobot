@@ -268,20 +268,29 @@ Supports DH Robotics grippers (AG-95, PGE, RGD, PGC series) connected to the Dob
 
 ### How it Works
 
-The gripper communicates through the Dobot controller's **internal Modbus TCP gateway** at `127.0.0.1:60000`. This gateway is configured by the DHGrip Dobot Studio plugin.
+The gripper connects to the robot's **tool flange via RS-485**. The Dobot controller has an internal **Modbus TCP gateway** at `127.0.0.1:60000` that bridges TCP to the RS-485 bus, allowing software to communicate with the gripper using standard Modbus registers.
 
-> **Note:** A robot power cycle resets this gateway. If gripper commands return -1, re-run the DHGrip plugin on the teach pendant (install → enable → uninstall) to restore port 60000.
+The gateway requires the tool RS-485 interface to be configured first. Our `gripper_node.py` handles this automatically on startup by calling the `SetTool485(115200)` dashboard command, which sets the baud rate and enables the gateway. This eliminates the need for the DHGrip Dobot Studio plugin.
 
 ```
-CLI / Action Server
-        │
-        ▼  ROS2 Services
-  ModbusCreate(127.0.0.1, 60000, slave_id=1)
-  SetHoldRegs / GetHoldRegs
-        │
-        ▼  Dobot Controller Internal Gateway
-  127.0.0.1:60000 → Tool RS485 → Gripper
+gripper_node.py (ROS2 node)
+      │
+      ├── SetTool485(115200)          ← Configures tool RS-485, enables gateway
+      │
+      ├── ModbusCreate(127.0.0.1, 60000, slave_id=1, RTU)
+      │         │
+      │         ▼  Dobot Internal Gateway
+      │    127.0.0.1:60000 → Tool RS-485 → Gripper
+      │
+      ├── SetHoldRegs / GetHoldRegs   ← Read/write gripper registers
+      │
+      └── Publishes /gripper/state at 5Hz (position, grip state, init status)
 ```
+
+The gripper node owns the single Modbus connection and exposes it to the rest of the system via:
+- **Topic** `/gripper/state` — JSON state at 5Hz (position, grip state, init status)
+- **Service** `/gripper/init` — trigger gripper initialization
+- **Action** `/gripper` — move gripper to a position with feedback
 
 ### Register Map
 

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Gripper auto-setup** — gripper_node.py now calls `SetTool485` on startup to configure the tool RS-485 interface and enable the Modbus TCP gateway on port 60000. The gripper works automatically after robot power-on without needing the DHGrip Dobot Studio plugin.
 - **Web dashboard** at http://localhost:7070 — browser-based robot control with real-time WebSocket state updates (5Hz)
 - **`startup.sh`** — single command to bring up driver + web dashboard
   - `./startup.sh` — start system

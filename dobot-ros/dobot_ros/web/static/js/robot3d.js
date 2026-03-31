@@ -70,7 +70,7 @@ function init() {
   controls.update();
 
   // Lights — hemisphere for ambient sky/ground tint, then directional for definition
-  scene.add(new THREE.HemisphereLight(0x8ec8ff, 0x1a1a2e, 1.0));
+  scene.add(new THREE.HemisphereLight(0x8ec8ff, 0x1a1a2e, 1.2));
 
   const key = new THREE.DirectionalLight(0xffffff, 1.8);
   key.position.set(2, 4, 3);
@@ -102,10 +102,15 @@ function init() {
   animate();
 }
 
-// Replace Collada materials with PBR MeshStandardMaterial
+// Replace Collada materials with PBR MeshStandardMaterial and strip embedded lights/cameras
 function upgradeMaterials(object, linkName) {
   const props = LINK_COLORS[linkName] || { color: 0xcccccc, metalness: 0.2, roughness: 0.4 };
+  const toRemove = [];
   object.traverse((child) => {
+    if (child.isLight || child.isCamera) {
+      toRemove.push(child);
+      return;
+    }
     if (!child.isMesh) return;
     child.material = new THREE.MeshStandardMaterial({
       color: props.color,
@@ -115,6 +120,7 @@ function upgradeMaterials(object, linkName) {
     child.castShadow = true;
     child.receiveShadow = true;
   });
+  toRemove.forEach((obj) => obj.parent && obj.parent.remove(obj));
 }
 
 function loadRobot() {

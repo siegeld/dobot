@@ -53,14 +53,7 @@ The active development focus is the ROS2 path.
 DH Robotics gripper via Modbus TCP through Dobot's internal gateway at 127.0.0.1:60000.
 Position range: 0 (closed) to 1000 (open). Must call `gripper init` before use.
 
-**Port 60000 requires DHGrip plugin**: The Modbus TCP gateway on port 60000 is configured by the DHGrip Dobot Studio plugin. A robot power cycle resets this config. To restore after power cycle:
-1. Open Dobot Studio on the teach pendant
-2. Install/run the DHGrip plugin (Settings → Plugin → DHGrip)
-3. Enable the gripper in the plugin
-4. Uninstall/close the plugin (it holds the Modbus connection while running)
-5. The gateway on port 60000 remains active after the plugin is closed
-
-**TODO**: Find a way to configure port 60000 permanently without the plugin, or discover the API command the plugin uses to set it up.
+**RS-485 setup**: The Modbus TCP gateway on port 60000 requires the tool RS-485 interface to be configured first. `gripper_node.py` calls `SetTool485(115200)` automatically on startup, which configures the RS-485 baud rate and enables the gateway. No DHGrip plugin needed.
 
 ## Gotchas
 

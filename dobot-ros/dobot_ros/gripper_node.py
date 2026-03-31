@@ -38,6 +38,7 @@ from dobot_msgs_v4.srv import (
     ModbusClose,
     SetHoldRegs,
     GetHoldRegs,
+    SetTool485,
 )
 
 # Write registers
@@ -84,6 +85,8 @@ class GripperNode(Node):
             SetHoldRegs, f'{srv}/SetHoldRegs', callback_group=self._cb_group)
         self._get_hold_regs_client = self.create_client(
             GetHoldRegs, f'{srv}/GetHoldRegs', callback_group=self._cb_group)
+        self._set_tool_485_client = self.create_client(
+            SetTool485, f'{srv}/SetTool485', callback_group=self._cb_group)
 
         # State publisher
         self._state_pub = self.create_publisher(String, '/gripper/state', 10)
@@ -125,7 +128,23 @@ class GripperNode(Node):
             raise RuntimeError(f'Service call failed: {client.srv_name}')
         return future.result()
 
+    def _setup_tool_485(self):
+        """Configure tool RS-485 interface to enable Modbus TCP gateway on port 60000."""
+        req = SetTool485.Request()
+        req.baudrate = 115200
+        req.parity = 'N'
+        req.stop = 1
+        req.identify = 1
+        result = self._call_service_sync(self._set_tool_485_client, req)
+        if result.res != 0:
+            self.get_logger().warn(f'SetTool485 returned res={result.res}')
+        else:
+            self.get_logger().info('Tool RS-485 configured (115200 baud)')
+
     def _create_modbus(self):
+        # Configure tool RS-485 to enable Modbus TCP gateway on port 60000
+        self._setup_tool_485()
+
         # Close any stale connections first
         for idx in range(5):
             try:
