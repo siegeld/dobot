@@ -194,6 +194,8 @@ async def enable_robot():
         client = _get_client()
         with _lock:
             res = client.enable_robot()
+            # Safety: set speed to 5% on enable
+            client.set_speed_factor(5)
         return {"success": True, "result": res}
     except Exception as e:
         return {"success": False, "error": str(e)}

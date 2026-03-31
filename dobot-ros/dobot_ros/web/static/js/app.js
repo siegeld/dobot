@@ -10,7 +10,7 @@
     connected: false,
     linearStep: 5,
     angularStep: 5,
-    jogSpeed: 50,
+    jogSpeed: 5,
     jogMode: 'user',
     gripperOpen: true,
     ws: null,
