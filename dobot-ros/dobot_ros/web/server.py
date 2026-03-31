@@ -427,6 +427,11 @@ async def index():
     return FileResponse(str(STATIC_DIR / "index.html"))
 
 
+@app.get("/pendant")
+async def pendant():
+    return FileResponse(str(STATIC_DIR / "pendant.html"))
+
+
 # ── Run ─────────────────────────────────────────────────────────
 
 def start_server(config: Config, host: str = "0.0.0.0", port: int = 8080):

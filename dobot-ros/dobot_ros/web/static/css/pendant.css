@@ -1,0 +1,463 @@
+/* ── Teach Pendant — touch-optimized layout for landscape tablet ── */
+
+.pendant-body {
+  overflow: hidden;
+  touch-action: manipulation;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--db-bg, #0d1117);
+  color: var(--db-text, #c9d1d9);
+  font-size: 0.95rem;
+}
+
+/* ── Status Bar ───────────────────────────────────────────── */
+
+#status-bar {
+  height: 48px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: var(--db-card, #161b22);
+  border-bottom: 1px solid var(--db-border, #30363d);
+  gap: 12px;
+}
+
+.sb-left, .sb-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sb-center {
+  flex: 1;
+  text-align: center;
+}
+
+.sb-back {
+  color: var(--db-accent, #58a6ff);
+  font-size: 1.3rem;
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.sb-back:active {
+  background: rgba(88, 166, 255, 0.15);
+}
+
+.sb-brand {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--db-text);
+}
+
+.sb-error {
+  color: var(--db-danger, #f85149);
+  font-weight: 600;
+}
+
+.sb-label {
+  color: var(--db-muted, #8b949e);
+  font-size: 0.85rem;
+}
+
+.sb-value {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--db-accent);
+}
+
+/* ── Main Grid ────────────────────────────────────────────── */
+
+#pendant-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 240px 1fr 260px;
+  gap: 4px;
+  padding: 4px;
+  min-height: 0;
+}
+
+/* ── Panels (shared) ──────────────────────────────────────── */
+
+#panel-position, #panel-controls {
+  background: var(--db-card);
+  border-radius: 8px;
+  border: 1px solid var(--db-border);
+  padding: 8px 10px;
+  overflow-y: auto;
+}
+
+#panel-jog {
+  background: var(--db-card);
+  border-radius: 8px;
+  border: 1px solid var(--db-border);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tp-panel-header {
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--db-accent);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--db-border);
+}
+
+.tp-section-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--db-muted);
+  margin-bottom: 4px;
+  margin-top: 6px;
+}
+
+/* ── Position Table ───────────────────────────────────────── */
+
+.tp-pos-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tp-pos-table td {
+  padding: 2px 4px;
+  font-size: 0.9rem;
+}
+
+.tp-axis-label {
+  font-weight: 700;
+  width: 30px;
+  color: var(--db-muted);
+}
+
+.tp-pos-value {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  text-align: right;
+  min-width: 5.5rem;
+  font-weight: 500;
+}
+
+.tp-unit {
+  color: var(--db-muted);
+  font-size: 0.8rem;
+  width: 24px;
+}
+
+/* Axis colors */
+.ax-x  { color: #f85149 !important; }
+.ax-y  { color: #3fb950 !important; }
+.ax-z  { color: #58a6ff !important; }
+.ax-rx { color: #f0883e !important; }
+.ax-ry { color: #a371f7 !important; }
+.ax-rz { color: #56d4dd !important; }
+
+/* ── Jog Toolbar ──────────────────────────────────────────── */
+
+.tp-jog-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.tp-tab-group {
+  display: flex;
+  gap: 2px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.tp-tab {
+  border: none;
+  background: transparent;
+  color: var(--db-muted);
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tp-tab.active {
+  background: var(--db-accent);
+  color: #fff;
+}
+
+.tp-tab:active {
+  transform: scale(0.95);
+}
+
+.tp-step-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tp-step-label {
+  font-size: 0.75rem;
+  color: var(--db-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.tp-step-unit {
+  font-size: 0.75rem;
+  color: var(--db-muted);
+}
+
+.tp-step-sep {
+  color: var(--db-border);
+  margin: 0 4px;
+}
+
+.tp-step-btns {
+  display: flex;
+  gap: 3px;
+}
+
+.tp-step-btn {
+  min-height: 36px;
+  min-width: 40px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border: 1px solid var(--db-border);
+  background: transparent;
+  color: var(--db-text);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tp-step-btn.active {
+  background: var(--db-accent);
+  color: #fff;
+  border-color: var(--db-accent);
+}
+
+.tp-step-btn:active {
+  transform: scale(0.93);
+}
+
+/* ── Jog Grid ─────────────────────────────────────────────── */
+
+.tp-jog-grid {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.tp-jog-row {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-height: 0;
+}
+
+.tp-jog-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 1.1rem;
+  width: 48px;
+  flex-shrink: 0;
+  color: var(--db-muted);
+}
+
+.tp-jog-btn {
+  flex: 1;
+  min-height: 56px;
+  font-size: 1.8rem;
+  font-weight: 700;
+  border: 2px solid var(--db-border);
+  background: rgba(255,255,255,0.03);
+  color: var(--db-text);
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform 0.05s;
+}
+
+.tp-jog-btn:active {
+  transform: scale(0.93);
+}
+
+.tp-jog-minus {
+  border-color: rgba(248, 81, 73, 0.4);
+  color: #f85149;
+}
+
+.tp-jog-minus:active {
+  background: rgba(248, 81, 73, 0.15);
+}
+
+.tp-jog-plus {
+  border-color: rgba(63, 185, 80, 0.4);
+  color: #3fb950;
+}
+
+.tp-jog-plus:active {
+  background: rgba(63, 185, 80, 0.15);
+}
+
+/* ── Control Buttons ──────────────────────────────────────── */
+
+.tp-ctrl-group {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.tp-ctrl-btn {
+  flex: 1;
+  min-height: 44px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #fff;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tp-ctrl-btn:active {
+  transform: scale(0.95);
+  transition: transform 0.05s;
+}
+
+.tp-ctrl-full {
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.tp-btn-success    { background: var(--db-success, #3fb950); }
+.tp-btn-secondary  { background: #484f58; }
+.tp-btn-warning    { background: var(--db-warning, #d29922); }
+.tp-btn-info       { background: #1f6feb; }
+.tp-btn-outline    { background: transparent; border: 1px solid var(--db-border); color: var(--db-text); }
+
+/* ── STOP Button ──────────────────────────────────────────── */
+
+.tp-stop-btn {
+  width: 100%;
+  min-height: 64px;
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  background: var(--db-danger, #f85149);
+  color: #fff;
+  border: 3px solid #ff6b6b;
+  border-radius: 10px;
+  cursor: pointer;
+  margin-bottom: 6px;
+  box-shadow: 0 0 16px rgba(248, 81, 73, 0.25);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tp-stop-btn:active {
+  transform: scale(0.95);
+  background: #da3633;
+  transition: transform 0.05s;
+}
+
+/* ── Speed Slider ─────────────────────────────────────────── */
+
+.tp-speed-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tp-range {
+  flex: 1;
+  height: 28px;
+  accent-color: var(--db-accent);
+}
+
+.tp-speed-val {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-weight: 600;
+  font-size: 0.9rem;
+  min-width: 3rem;
+  text-align: right;
+}
+
+/* ── Coordinate Mode ──────────────────────────────────────── */
+
+.tp-mode-group {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.tp-mode-btn {
+  flex: 1;
+  min-height: 38px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border: 1px solid var(--db-border);
+  background: transparent;
+  color: var(--db-text);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tp-mode-btn.active {
+  background: var(--db-accent);
+  color: #fff;
+  border-color: var(--db-accent);
+}
+
+.tp-mode-btn:active {
+  transform: scale(0.95);
+}
+
+/* ── Gripper ──────────────────────────────────────────────── */
+
+.tp-gripper-bar-wrap {
+  height: 14px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 7px;
+  overflow: hidden;
+  margin: 6px 0;
+}
+
+.tp-gripper-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--db-accent), var(--db-success));
+  border-radius: 7px;
+  transition: width 0.15s;
+}
+
+.tp-gripper-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--db-muted);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}

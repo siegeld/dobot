@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Dobot CR5 - Teach Pendant</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="/static/css/dashboard.css" rel="stylesheet">
+  <link href="/static/css/pendant.css" rel="stylesheet">
+</head>
+<body class="pendant-body">
+
+<!-- ── Status Bar ──────────────────────────────────────────── -->
+<header id="status-bar">
+  <div class="sb-left">
+    <a href="/" class="sb-back" title="Dashboard"><i class="bi bi-arrow-left"></i></a>
+    <span class="sb-brand"><i class="bi bi-robot"></i> Dobot CR5</span>
+    <span id="badge-mode" class="badge bg-secondary">--</span>
+    <span id="badge-connection" class="status-badge badge-disconnected">
+      <i class="bi bi-circle-fill"></i> <span id="conn-text">Disconnected</span>
+    </span>
+  </div>
+  <div class="sb-center">
+    <span id="error-display" class="sb-error" style="display:none">
+      <i class="bi bi-exclamation-triangle-fill"></i> <span id="error-text"></span>
+    </span>
+  </div>
+  <div class="sb-right">
+    <span class="sb-label">Speed</span>
+    <span id="speed-display" class="sb-value">--</span>
+    <span class="sb-label">%</span>
+  </div>
+</header>
+
+<!-- ── Main Grid ──────────────────────────────────────────── -->
+<main id="pendant-grid">
+
+  <!-- LEFT: Position Display -->
+  <aside id="panel-position">
+    <div class="tp-panel-header">Position</div>
+    <div class="tp-section-label">Joint Angles</div>
+    <table class="tp-pos-table">
+      <tbody>
+        <tr><td class="tp-axis-label">J1</td><td id="tp-j1" class="tp-pos-value">--</td><td class="tp-unit">&deg;</td></tr>
+        <tr><td class="tp-axis-label">J2</td><td id="tp-j2" class="tp-pos-value">--</td><td class="tp-unit">&deg;</td></tr>
+        <tr><td class="tp-axis-label">J3</td><td id="tp-j3" class="tp-pos-value">--</td><td class="tp-unit">&deg;</td></tr>
+        <tr><td class="tp-axis-label">J4</td><td id="tp-j4" class="tp-pos-value">--</td><td class="tp-unit">&deg;</td></tr>
+        <tr><td class="tp-axis-label">J5</td><td id="tp-j5" class="tp-pos-value">--</td><td class="tp-unit">&deg;</td></tr>
+        <tr><td class="tp-axis-label">J6</td><td id="tp-j6" class="tp-pos-value">--</td><td class="tp-unit">&deg;</td></tr>
+      </tbody>
+    </table>
+    <div class="tp-section-label mt-2">Cartesian Pose</div>
+    <table class="tp-pos-table">
+      <tbody>
+        <tr><td class="tp-axis-label ax-x">X</td><td id="tp-px" class="tp-pos-value">--</td><td class="tp-unit">mm</td></tr>
+        <tr><td class="tp-axis-label ax-y">Y</td><td id="tp-py" class="tp-pos-value">--</td><td class="tp-unit">mm</td></tr>
+        <tr><td class="tp-axis-label ax-z">Z</td><td id="tp-pz" class="tp-pos-value">--</td><td class="tp-unit">mm</td></tr>
+        <tr><td class="tp-axis-label ax-rx">RX</td><td id="tp-prx" class="tp-pos-value">--</td><td class="tp-unit">&deg;</td></tr>
+        <tr><td class="tp-axis-label ax-ry">RY</td><td id="tp-pry" class="tp-pos-value">--</td><td class="tp-unit">&deg;</td></tr>
+        <tr><td class="tp-axis-label ax-rz">RZ</td><td id="tp-prz" class="tp-pos-value">--</td><td class="tp-unit">&deg;</td></tr>
+      </tbody>
+    </table>
+  </aside>
+
+  <!-- CENTER: Jog Controls -->
+  <section id="panel-jog">
+    <!-- Tab + step selectors -->
+    <div class="tp-jog-toolbar">
+      <div class="tp-tab-group">
+        <button class="tp-tab active" data-tab="cartesian">Cartesian</button>
+        <button class="tp-tab" data-tab="joint">Joint</button>
+      </div>
+      <div class="tp-step-group">
+        <span class="tp-step-label">Linear</span>
+        <div class="tp-step-btns" id="linear-steps">
+          <button class="tp-step-btn" data-step="1">1</button>
+          <button class="tp-step-btn active" data-step="5">5</button>
+          <button class="tp-step-btn" data-step="10">10</button>
+          <button class="tp-step-btn" data-step="25">25</button>
+          <button class="tp-step-btn" data-step="50">50</button>
+        </div>
+        <span class="tp-step-unit">mm</span>
+        <span class="tp-step-sep">|</span>
+        <span class="tp-step-label">Angular</span>
+        <div class="tp-step-btns" id="angular-steps">
+          <button class="tp-step-btn" data-step="1">1</button>
+          <button class="tp-step-btn active" data-step="5">5</button>
+          <button class="tp-step-btn" data-step="10">10</button>
+          <button class="tp-step-btn" data-step="25">25</button>
+          <button class="tp-step-btn" data-step="45">45</button>
+        </div>
+        <span class="tp-step-unit">&deg;</span>
+      </div>
+    </div>
+
+    <!-- Cartesian jog -->
+    <div id="jog-cartesian" class="tp-jog-grid">
+      <div class="tp-jog-row"><span class="tp-jog-label ax-x">X</span><button class="tp-jog-btn tp-jog-minus" data-axis="x" data-dir="-1">&minus;</button><button class="tp-jog-btn tp-jog-plus" data-axis="x" data-dir="1">+</button></div>
+      <div class="tp-jog-row"><span class="tp-jog-label ax-y">Y</span><button class="tp-jog-btn tp-jog-minus" data-axis="y" data-dir="-1">&minus;</button><button class="tp-jog-btn tp-jog-plus" data-axis="y" data-dir="1">+</button></div>
+      <div class="tp-jog-row"><span class="tp-jog-label ax-z">Z</span><button class="tp-jog-btn tp-jog-minus" data-axis="z" data-dir="-1">&minus;</button><button class="tp-jog-btn tp-jog-plus" data-axis="z" data-dir="1">+</button></div>
+      <div class="tp-jog-row"><span class="tp-jog-label ax-rx">RX</span><button class="tp-jog-btn tp-jog-minus" data-axis="rx" data-dir="-1">&minus;</button><button class="tp-jog-btn tp-jog-plus" data-axis="rx" data-dir="1">+</button></div>
+      <div class="tp-jog-row"><span class="tp-jog-label ax-ry">RY</span><button class="tp-jog-btn tp-jog-minus" data-axis="ry" data-dir="-1">&minus;</button><button class="tp-jog-btn tp-jog-plus" data-axis="ry" data-dir="1">+</button></div>
+      <div class="tp-jog-row"><span class="tp-jog-label ax-rz">RZ</span><button class="tp-jog-btn tp-jog-minus" data-axis="rz" data-dir="-1">&minus;</button><button class="tp-jog-btn tp-jog-plus" data-axis="rz" data-dir="1">+</button></div>
+    </div>
+
+    <!-- Joint jog -->
+    <div id="jog-joint" class="tp-jog-grid" style="display:none">
+      <div class="tp-jog-row"><span class="tp-jog-label">J1</span><button class="tp-jog-btn tp-jog-minus" data-axis="j1" data-dir="-1">&minus;</button><button class="tp-jog-btn tp-jog-plus" data-axis="j1" data-dir="1">+</button></div>
+      <div class="tp-jog-row"><span class="tp-jog-label">J2</span><button class="tp-jog-btn tp-jog-minus" data-axis="j2" data-dir="-1">&minus;</button><button class="tp-jog-btn tp-jog-plus" data-axis="j2" data-dir="1">+</button></div>
+      <div class="tp-jog-row"><span class="tp-jog-label">J3</span><button class="tp-jog-btn tp-jog-minus" data-axis="j3" data-dir="-1">&minus;</button><button class="tp-jog-btn tp-jog-plus" data-axis="j3" data-dir="1">+</button></div>
+      <div class="tp-jog-row"><span class="tp-jog-label">J4</span><button class="tp-jog-btn tp-jog-minus" data-axis="j4" data-dir="-1">&minus;</button><button class="tp-jog-btn tp-jog-plus" data-axis="j4" data-dir="1">+</button></div>
+      <div class="tp-jog-row"><span class="tp-jog-label">J5</span><button class="tp-jog-btn tp-jog-minus" data-axis="j5" data-dir="-1">&minus;</button><button class="tp-jog-btn tp-jog-plus" data-axis="j5" data-dir="1">+</button></div>
+      <div class="tp-jog-row"><span class="tp-jog-label">J6</span><button class="tp-jog-btn tp-jog-minus" data-axis="j6" data-dir="-1">&minus;</button><button class="tp-jog-btn tp-jog-plus" data-axis="j6" data-dir="1">+</button></div>
+    </div>
+  </section>
+
+  <!-- RIGHT: Robot Controls -->
+  <aside id="panel-controls">
+    <div class="tp-panel-header">Controls</div>
+
+    <!-- Robot enable/disable -->
+    <div class="tp-ctrl-group">
+      <button id="btn-tp-enable" class="tp-ctrl-btn tp-btn-success">Enable</button>
+      <button id="btn-tp-disable" class="tp-ctrl-btn tp-btn-secondary">Disable</button>
+    </div>
+    <button id="btn-tp-stop" class="tp-stop-btn">STOP</button>
+    <button id="btn-tp-clear" class="tp-ctrl-btn tp-btn-warning tp-ctrl-full">Clear Error</button>
+
+    <!-- Speed -->
+    <div class="tp-section-label mt-3">Robot Speed</div>
+    <div class="tp-speed-row">
+      <input type="range" id="tp-speed-slider" class="tp-range" min="1" max="100" value="50">
+      <span id="tp-speed-val" class="tp-speed-val">50%</span>
+    </div>
+
+    <!-- Jog speed -->
+    <div class="tp-section-label">Jog Speed</div>
+    <div class="tp-speed-row">
+      <input type="range" id="tp-jog-speed" class="tp-range" min="1" max="100" value="50">
+      <span id="tp-jog-speed-val" class="tp-speed-val">50%</span>
+    </div>
+
+    <!-- Coordinate mode -->
+    <div class="tp-section-label">Coord Mode</div>
+    <div class="tp-mode-group">
+      <button class="tp-mode-btn active" data-mode="user">User</button>
+      <button class="tp-mode-btn" data-mode="tool">Tool</button>
+    </div>
+
+    <!-- Gripper -->
+    <div class="tp-section-label mt-3">Gripper <span id="tp-gripper-badge" class="badge bg-secondary ms-1">Not Init</span></div>
+    <div class="tp-ctrl-group">
+      <button id="btn-tp-gripper-open" class="tp-ctrl-btn tp-btn-info">Open</button>
+      <button id="btn-tp-gripper-close" class="tp-ctrl-btn tp-btn-info">Close</button>
+    </div>
+    <button id="btn-tp-gripper-init" class="tp-ctrl-btn tp-btn-outline tp-ctrl-full">Init Gripper</button>
+    <div class="tp-gripper-bar-wrap">
+      <div id="tp-gripper-bar" class="tp-gripper-bar"></div>
+    </div>
+    <div class="tp-gripper-info">
+      <span>Pos: <span id="tp-gripper-pos">--</span></span>
+      <span>State: <span id="tp-gripper-state">--</span></span>
+    </div>
+  </aside>
+
+</main>
+
+<!-- Toast container -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/static/js/pendant.js"></script>
+</body>
+</html>
