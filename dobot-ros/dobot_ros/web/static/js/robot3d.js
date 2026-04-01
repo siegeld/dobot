@@ -24,13 +24,13 @@ const LINK_FILES = ['Link1.dae', 'Link2.dae', 'Link3.dae', 'Link4.dae', 'Link5.d
 // Per-link material overrides (Dobot CR5 color scheme)
 // base_link = dark charcoal, Link1 = dark joint cover, Links 2-3 = white arm, Links 4-6 = lighter wrist
 const LINK_COLORS = {
-  'base_link': { color: 0x1a1a1e, metalness: 0.4, roughness: 0.5 },
-  'Link1':     { color: 0x2a2a30, metalness: 0.35, roughness: 0.45 },
+  'base_link': { color: 0x8a8a94, metalness: 0.4, roughness: 0.5 },
+  'Link1':     { color: 0x9a9aa4, metalness: 0.35, roughness: 0.45 },
   'Link2':     { color: 0xd8dce2, metalness: 0.15, roughness: 0.35 },
   'Link3':     { color: 0xd8dce2, metalness: 0.15, roughness: 0.35 },
-  'Link4':     { color: 0x2a2a30, metalness: 0.35, roughness: 0.45 },
-  'Link5':     { color: 0x2a2a30, metalness: 0.35, roughness: 0.45 },
-  'Link6':     { color: 0x3a3a42, metalness: 0.3,  roughness: 0.4 },
+  'Link4':     { color: 0x9a9aa4, metalness: 0.35, roughness: 0.45 },
+  'Link5':     { color: 0x9a9aa4, metalness: 0.35, roughness: 0.45 },
+  'Link6':     { color: 0xa5a5ae, metalness: 0.3,  roughness: 0.4 },
 };
 
 let scene, camera, renderer, controls;

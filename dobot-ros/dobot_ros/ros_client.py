@@ -61,8 +61,10 @@ class DobotRosClient(Node):
         namespace: str = '',
         service_timeout: float = 5.0,
         subscribe_topics: bool = False,
+        managed_executor: bool = False,
     ):
         super().__init__('dobot_ros_cli')
+        self._managed_executor = managed_executor
 
         self.namespace = namespace.rstrip('/')
         self.service_timeout = service_timeout
@@ -154,18 +156,36 @@ class DobotRosClient(Node):
         timeout = timeout or self.service_timeout
         return client.wait_for_service(timeout_sec=timeout)
 
+    def _wait_for_future(self, future, timeout: float = None):
+        """Wait for an rclpy Future to complete.
+
+        When managed_executor=True, an external executor is spinning this node,
+        so we wait via threading.Event instead of calling spin_until_future_complete
+        (which would conflict by trying to add the node to a second executor).
+        """
+        timeout = timeout or self.service_timeout
+        if self._managed_executor:
+            event = threading.Event()
+            future.add_done_callback(lambda _: event.set())
+            if not event.wait(timeout=timeout):
+                return None
+            return future.result()
+        else:
+            rclpy.spin_until_future_complete(self, future, timeout_sec=timeout)
+            return future.result()
+
     def _call_service(self, client, request):
         """Call a service and wait for response."""
         if not self._wait_for_service(client):
             raise TimeoutError(f"Service {client.srv_name} not available")
 
         future = client.call_async(request)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=self.service_timeout)
+        result = self._wait_for_future(future)
 
-        if future.result() is None:
+        if result is None:
             raise RuntimeError(f"Service call failed: {client.srv_name}")
 
-        return future.result()
+        return result
 
     # ── Robot state (from topics) ──────────────────────────────
 
@@ -404,17 +424,15 @@ class DobotRosClient(Node):
         goal.speed = speed
         goal.force = force
         future = self._gripper_action_client.send_goal_async(goal)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=self.service_timeout)
-        goal_handle = future.result()
-        if not goal_handle.accepted:
+        goal_handle = self._wait_for_future(future)
+        if goal_handle is None or not goal_handle.accepted:
             raise RuntimeError('Gripper goal rejected')
 
         if not wait:
             return 0
 
         result_future = goal_handle.get_result_async()
-        rclpy.spin_until_future_complete(self, result_future, timeout_sec=timeout)
-        result = result_future.result()
+        result = self._wait_for_future(result_future, timeout=timeout)
         if result is None:
             return -1
         return result.result.status

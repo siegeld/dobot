@@ -270,12 +270,12 @@ Supports DH Robotics grippers (AG-95, PGE, RGD, PGC series) connected to the Dob
 
 The gripper connects to the robot's **tool flange via RS-485**. The Dobot controller has an internal **Modbus TCP gateway** at `127.0.0.1:60000` that bridges TCP to the RS-485 bus, allowing software to communicate with the gripper using standard Modbus registers.
 
-The gateway requires the tool RS-485 interface to be configured first. Our `gripper_node.py` handles this automatically on startup by calling the `SetTool485(115200)` dashboard command, which sets the baud rate and enables the gateway. This eliminates the need for the DHGrip Dobot Studio plugin.
+The gateway is created by calling `SetTool485(115200)`, which configures the tool RS-485 baud rate and enables the TCP-to-RS485 bridge. The `gripper_node.py` handles this automatically on startup. No DHGrip Dobot Studio plugin needed (though the node's Modbus pattern was derived from the working DHGrip Lua plugin in `DHGrip_v2-1-4-stable/`).
 
 ```
 gripper_node.py (ROS2 node)
       │
-      ├── SetTool485(115200)          ← Configures tool RS-485, enables gateway
+      ├── SetTool485(115200)          ← Configures tool RS-485, creates gateway
       │
       ├── ModbusCreate(127.0.0.1, 60000, slave_id=1, RTU)
       │         │
@@ -284,13 +284,22 @@ gripper_node.py (ROS2 node)
       │
       ├── SetHoldRegs / GetHoldRegs   ← Read/write gripper registers
       │
+      ├── ModbusClose                 ← Closed and reopened for write operations
+      │
       └── Publishes /gripper/state at 5Hz (position, grip state, init status)
 ```
 
-The gripper node owns the single Modbus connection and exposes it to the rest of the system via:
+**Connection management:**
+- State polling (5Hz) uses a persistent Modbus connection for low overhead
+- Write operations (move, init) reconnect first (close → SetTool485 → create) to ensure a clean connection, matching the DHGrip plugin's `NewConnection` pattern
+- All operations are serialized via a mutex (equivalent to the plugin's `Lock485`/`UnLock485`)
+
+The gripper node exposes the gripper to the rest of the system via:
 - **Topic** `/gripper/state` — JSON state at 5Hz (position, grip state, init status)
 - **Service** `/gripper/init` — trigger gripper initialization
 - **Action** `/gripper` — move gripper to a position with feedback
+
+**Web dashboard:** Gripper commands (open/close/move) are fire-and-forget — the HTTP API returns immediately after sending the action goal. Position and state updates flow to the browser in real time via the `/gripper/state` topic → WebSocket. The gripper position slider updates live as the gripper moves.
 
 ### Register Map
 

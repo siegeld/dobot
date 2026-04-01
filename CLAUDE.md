@@ -53,7 +53,15 @@ The active development focus is the ROS2 path.
 DH Robotics gripper via Modbus TCP through Dobot's internal gateway at 127.0.0.1:60000.
 Position range: 0 (closed) to 1000 (open). Must call `gripper init` before use.
 
-**RS-485 setup**: The Modbus TCP gateway on port 60000 requires the tool RS-485 interface to be configured first. `gripper_node.py` calls `SetTool485(115200)` automatically on startup, which configures the RS-485 baud rate and enables the gateway. No DHGrip plugin needed.
+**RS-485 setup**: `SetTool485(115200)` creates the Modbus TCP gateway on port 60000. The gripper node calls this once at startup. No DHGrip plugin needed.
+
+**Modbus connection pattern** (derived from the working DHGrip Lua plugin in `DHGrip_v2-1-4-stable/`):
+- A persistent connection (SetTool485 → ModbusCreate once) is used for state polling at 5Hz
+- Write operations (move, init) reconnect first (ModbusClose → SetTool485 → ModbusCreate) to get a fresh connection, matching the plugin's `NewConnection` pattern
+- All Modbus operations are serialized via a threading lock (equivalent to the plugin's `Lock485`/`UnLock485`)
+- Multi-register reads return comma-separated values inside braces: `0,{1,1,712},GetHoldRegs(...)` — parsed with `re.search(r'\{([^}]+)\}', ...)`
+
+**Web dashboard gripper**: Commands (open/close/move) are fire-and-forget — the HTTP endpoint returns immediately after sending the ROS2 action goal. Position and state updates flow through the `/gripper/state` topic → WebSocket at 5Hz. The position slider updates live from WebSocket data.
 
 ## Gotchas
 

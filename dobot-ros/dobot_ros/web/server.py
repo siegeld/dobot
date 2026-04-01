@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 import rclpy
+from rclpy.executors import MultiThreadedExecutor
 from dobot_ros.config import Config
 from dobot_ros.ros_client import DobotRosClient
 
@@ -26,6 +27,7 @@ from dobot_ros.ros_client import DobotRosClient
 # ── Global state ────────────────────────────────────────────────
 
 _client: Optional[DobotRosClient] = None
+_executor: Optional[MultiThreadedExecutor] = None
 _config: Optional[Config] = None
 _lock = threading.Lock()
 _ws_clients: set = set()
@@ -47,29 +49,35 @@ _state = {
 
 
 def _get_client() -> DobotRosClient:
-    global _client
+    global _client, _executor
     if _client is None:
         if not rclpy.ok():
             rclpy.init()
+        _executor = MultiThreadedExecutor()
         _client = DobotRosClient(
             namespace=_config.ros_namespace if _config else '',
             service_timeout=_config.service_timeout if _config else 5.0,
             subscribe_topics=True,
+            managed_executor=True,
         )
+        _executor.add_node(_client)
+        # Dedicated spin thread processes ALL callbacks (topics + service responses)
+        # continuously — no more fighting between poll thread and API calls.
+        spin_thread = threading.Thread(target=_executor.spin, daemon=True)
+        spin_thread.start()
     return _client
 
 
 def _poll_state():
     """Poll robot state in a background thread.
 
-    Robot state and gripper state come from ROS2 topic subscriptions
-    cached in the DobotRosClient. We call spin_once to process callbacks.
+    Robot state comes from ROS2 topic subscriptions cached in the
+    DobotRosClient. The dedicated executor spin thread processes
+    callbacks continuously — we just read the latest cached values.
     """
     while True:
         try:
             client = _get_client()
-            # Process topic subscription callbacks
-            rclpy.spin_once(client, timeout_sec=0)
             with _lock:
                 try:
                     angles = client.get_joint_angles()
@@ -103,7 +111,13 @@ async def lifespan(app: FastAPI):
     t1.start()
     yield
     # Cleanup
-    global _client
+    global _client, _executor
+    if _executor:
+        try:
+            _executor.shutdown()
+        except Exception:
+            pass
+        _executor = None
     if _client:
         try:
             _client.shutdown()
@@ -192,10 +206,9 @@ async def enable_robot():
     """Enable the robot."""
     try:
         client = _get_client()
-        with _lock:
-            res = client.enable_robot()
-            # Safety: set speed to 5% on enable
-            client.set_speed_factor(5)
+        res = client.enable_robot()
+        # Safety: set speed to 5% on enable
+        client.set_speed_factor(5)
         return {"success": True, "result": res}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -206,8 +219,7 @@ async def disable_robot():
     """Disable the robot."""
     try:
         client = _get_client()
-        with _lock:
-            res = client.disable_robot()
+        res = client.disable_robot()
         return {"success": True, "result": res}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -218,8 +230,7 @@ async def clear_error():
     """Clear robot errors."""
     try:
         client = _get_client()
-        with _lock:
-            res = client.clear_error()
+        res = client.clear_error()
         return {"success": True, "result": res}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -230,8 +241,7 @@ async def stop_robot():
     """Emergency stop."""
     try:
         client = _get_client()
-        with _lock:
-            res = client.stop()
+        res = client.stop()
         return {"success": True, "result": res}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -242,8 +252,8 @@ async def set_speed(req: SpeedRequest):
     """Set global speed factor."""
     try:
         client = _get_client()
+        res = client.set_speed_factor(req.speed)
         with _lock:
-            res = client.set_speed_factor(req.speed)
             _state["speed_factor"] = req.speed
         return {"success": True, "result": res}
     except Exception as e:
@@ -255,20 +265,19 @@ async def jog_robot(req: JogRequest):
     """Jog robot by relative distance."""
     try:
         client = _get_client()
+        client.set_speed_factor(req.speed)
         with _lock:
-            # Set speed
-            client.set_speed_factor(req.speed)
             _state["speed_factor"] = req.speed
 
-            axis = req.axis.lower()
-            if axis.startswith('j'):
-                joint_num = int(axis[1])
-                client.jog_joint(joint_num, req.distance)
-            else:
-                client.set_jog_mode(req.mode)
-                params = {a: 0.0 for a in ('x', 'y', 'z', 'rx', 'ry', 'rz')}
-                params[axis] = req.distance
-                client.jog(**params)
+        axis = req.axis.lower()
+        if axis.startswith('j'):
+            joint_num = int(axis[1])
+            client.jog_joint(joint_num, req.distance)
+        else:
+            client.set_jog_mode(req.mode)
+            params = {a: 0.0 for a in ('x', 'y', 'z', 'rx', 'ry', 'rz')}
+            params[axis] = req.distance
+            client.jog(**params)
 
         return {"success": True, "axis": req.axis, "distance": req.distance}
     except Exception as e:
@@ -282,8 +291,7 @@ async def move_joints(req: MoveJointsRequest):
         if len(req.angles) != 6:
             return {"success": False, "error": "Must provide 6 joint angles"}
         client = _get_client()
-        with _lock:
-            res = client.move_joints(req.angles)
+        res = client.move_joints(req.angles)
         return {"success": True, "result": res}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -296,8 +304,8 @@ async def gripper_init():
     """Initialize the gripper."""
     try:
         client = _get_client()
+        client.gripper_init()
         with _lock:
-            client.gripper_init()
             _state["gripper_initialized"] = True
         return {"success": True}
     except Exception as e:
@@ -306,39 +314,33 @@ async def gripper_init():
 
 @app.post("/api/gripper/open")
 async def gripper_open(speed: int = 50, force: int = 50):
-    """Open the gripper."""
+    """Open the gripper (fire-and-forget, state updates via WebSocket)."""
     try:
         client = _get_client()
-        with _lock:
-            state = client.gripper_open(force=force, speed=speed)
-        state_names = {0: "moving", 1: "reached", 2: "caught", 3: "dropped", -1: "timeout"}
-        return {"success": True, "state": state, "state_name": state_names.get(state, str(state))}
+        client.gripper_open(force=force, speed=speed, wait=False)
+        return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
 @app.post("/api/gripper/close")
 async def gripper_close(speed: int = 50, force: int = 50):
-    """Close the gripper."""
+    """Close the gripper (fire-and-forget, state updates via WebSocket)."""
     try:
         client = _get_client()
-        with _lock:
-            state = client.gripper_close(force=force, speed=speed)
-        state_names = {0: "moving", 1: "reached", 2: "caught", 3: "dropped", -1: "timeout"}
-        return {"success": True, "state": state, "state_name": state_names.get(state, str(state))}
+        client.gripper_close(force=force, speed=speed, wait=False)
+        return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
 @app.post("/api/gripper/move")
 async def gripper_move(req: GripperMoveRequest):
-    """Move gripper to position."""
+    """Move gripper to position (fire-and-forget, state updates via WebSocket)."""
     try:
         client = _get_client()
-        with _lock:
-            state = client.gripper_move(req.position, force=req.force, speed=req.speed)
-        state_names = {0: "moving", 1: "reached", 2: "caught", 3: "dropped", -1: "timeout"}
-        return {"success": True, "state": state, "state_name": state_names.get(state, str(state))}
+        client.gripper_move(req.position, force=req.force, speed=req.speed, wait=False)
+        return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
 

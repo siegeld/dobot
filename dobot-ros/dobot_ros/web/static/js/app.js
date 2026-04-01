@@ -198,6 +198,11 @@
     if (data.gripper_position >= 0) {
       const gPos = data.gripper_position;
       $('#gripper-current-pos').textContent = gPos;
+      const slider = $('#gripper-pos-slider');
+      if (slider && document.activeElement !== slider) {
+        slider.value = gPos;
+        $('#gripper-pos-label').textContent = gPos;
+      }
       const gBar = document.getElementById('gripper-bar-fill');
       if (gBar) gBar.style.width = (gPos / 10) + '%';
     }

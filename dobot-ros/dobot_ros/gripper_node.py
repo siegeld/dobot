@@ -21,6 +21,7 @@ Register map (DH Robotics AG-95 / PGC-50 / PGE-50):
 
 import json
 import re
+import threading
 import time
 
 import rclpy
@@ -67,8 +68,9 @@ class GripperNode(Node):
         self.declare_parameter('init_timeout', 15.0)
 
         self._cb_group = ReentrantCallbackGroup()
-        self._initialized = False
+        self._modbus_lock = threading.Lock()
         self._modbus_index = -1
+        self._initialized = False
 
         # Cached state
         self._position = -1
@@ -115,12 +117,13 @@ class GripperNode(Node):
             2.0, self._auto_init, callback_group=self._cb_group)
 
     # ── Modbus helpers ──────────────────────────────────────────
+    # SetTool485 + ModbusCreate once at connect time, keep connection open.
+    # All operations serialized via _modbus_lock.
 
     def _call_service_sync(self, client, request, timeout=5.0):
         if not client.wait_for_service(timeout_sec=timeout):
             raise TimeoutError(f'Service {client.srv_name} not available')
         future = client.call_async(request)
-        # Wait for future without spinning (the MultiThreadedExecutor handles it)
         deadline = time.time() + timeout
         while not future.done() and time.time() < deadline:
             time.sleep(0.01)
@@ -128,44 +131,45 @@ class GripperNode(Node):
             raise RuntimeError(f'Service call failed: {client.srv_name}')
         return future.result()
 
-    def _setup_tool_485(self):
-        """Configure tool RS-485 interface to enable Modbus TCP gateway on port 60000."""
+    def _ensure_connected(self):
+        """SetTool485 + ModbusCreate if not already connected."""
+        if self._modbus_index >= 0:
+            return
+        # Configure RS-485 (creates port 60000 gateway)
         req = SetTool485.Request()
         req.baudrate = 115200
         req.parity = 'N'
         req.stop = 1
-        req.identify = 1
-        result = self._call_service_sync(self._set_tool_485_client, req)
-        if result.res != 0:
-            self.get_logger().warn(f'SetTool485 returned res={result.res}')
-        else:
-            self.get_logger().info('Tool RS-485 configured (115200 baud)')
-
-    def _create_modbus(self):
-        # Configure tool RS-485 to enable Modbus TCP gateway on port 60000
-        self._setup_tool_485()
-
-        # Close any stale connections first
-        for idx in range(5):
-            try:
-                req = ModbusClose.Request()
-                req.index = idx
-                self._call_service_sync(self._modbus_close_client, req)
-            except Exception:
-                pass
-
+        req.identify = 0
+        self._call_service_sync(self._set_tool_485_client, req)
+        # Open Modbus connection
         req = ModbusCreate.Request()
         req.ip = '127.0.0.1'
         req.port = 60000
         req.slave_id = self.get_parameter('slave_id').value
         req.is_rtu = 1
         result = self._call_service_sync(self._modbus_create_client, req)
-        # C++ driver's ModbusCreate uses callRosService (not _f),
-        # so robot_return is empty. After closing all, first gets index 0.
         self._modbus_index = 0
-        self.get_logger().info(f'Modbus TCP connected, index={self._modbus_index}')
+        if result.robot_return:
+            match = re.search(r'\{(\d+)\}', result.robot_return)
+            if match:
+                self._modbus_index = int(match.group(1))
+        self.get_logger().info(f'Modbus connected, index={self._modbus_index}')
+
+    def _reconnect(self):
+        """Close and reopen the Modbus connection."""
+        if self._modbus_index >= 0:
+            try:
+                req = ModbusClose.Request()
+                req.index = self._modbus_index
+                self._call_service_sync(self._modbus_close_client, req)
+            except Exception:
+                pass
+            self._modbus_index = -1
+        self._ensure_connected()
 
     def _write_reg(self, addr: int, value: int):
+        """Write one register."""
         req = SetHoldRegs.Request()
         req.index = self._modbus_index
         req.addr = addr
@@ -176,24 +180,28 @@ class GripperNode(Node):
         if result.res != 0:
             raise RuntimeError(f'SetHoldRegs failed: addr={addr} res={result.res}')
 
-    def _read_reg(self, addr: int):
+    def _read_regs(self, addr: int, count: int = 1):
+        """Read registers. Returns list of ints or None."""
         req = GetHoldRegs.Request()
         req.index = self._modbus_index
         req.addr = addr
-        req.count = 1
+        req.count = count
         req.val_type = 'U16'
         result = self._call_service_sync(self._get_hold_regs_client, req)
-        match = re.search(r'\{(\d+)\}', result.robot_return)
-        if match:
-            return int(match.group(1))
-        return None
+        # Response format: "0,{1,1,712},GetHoldRegs(...)" — values are comma-separated inside braces
+        brace_match = re.search(r'\{([^}]+)\}', result.robot_return)
+        if not brace_match:
+            return None
+        values = [int(v.strip()) for v in brace_match.group(1).split(',')]
+        return values if len(values) == count else None
 
     # ── Init ────────────────────────────────────────────────────
 
     async def _auto_init(self):
         self._init_timer.cancel()
         try:
-            self._create_modbus()
+            with self._modbus_lock:
+                self._ensure_connected()
             self._activate_gripper()
             self._initialized = True
             self.get_logger().info('Gripper ready')
@@ -203,48 +211,51 @@ class GripperNode(Node):
 
     def _activate_gripper(self):
         self.get_logger().info('Activating gripper...')
-        # Brief delay for Modbus slave to be ready after connection
         time.sleep(0.5)
-        # Check if gripper is already initialized
-        status = self._read_reg(REG_INIT_STATUS)
+        with self._modbus_lock:
+            vals = self._read_regs(REG_INIT_STATUS, 1)
+        status = vals[0] if vals else None
         self.get_logger().info(f'Current init status: {status}')
         if status == 1:
             self._init_status = 1
             self._initialized = True
             self.get_logger().info('Gripper already initialized')
             return
-        self._write_reg(REG_INIT, INIT_VALUE)
+        with self._modbus_lock:
+            self._write_reg(REG_INIT, INIT_VALUE)
         timeout = self.get_parameter('init_timeout').value
         start = time.time()
         while time.time() - start < timeout:
-            status = self._read_reg(REG_INIT_STATUS)
+            time.sleep(1.0)
+            with self._modbus_lock:
+                vals = self._read_regs(REG_INIT_STATUS, 1)
+            status = vals[0] if vals else None
             if status == 1:
                 self._init_status = 1
                 self._initialized = True
                 self.get_logger().info('Gripper initialized')
                 return
-            time.sleep(0.5)
         raise RuntimeError('Gripper init timed out')
 
     # ── State publishing ────────────────────────────────────────
 
     def _publish_state(self):
-        if self._modbus_index < 0:
-            return
-        try:
-            pos = self._read_reg(REG_CURRENT_POS)
-            state = self._read_reg(REG_GRIP_STATE)
-            init = self._read_reg(REG_INIT_STATUS)
-            if pos is not None:
-                self._position = pos
-            if state is not None:
-                self._grip_state = state
-            if init is not None:
-                self._init_status = init
-                self._initialized = init == 1
-        except Exception:
-            pass
+        # Read from Modbus only when no command is in progress
+        if self._modbus_index >= 0 and self._modbus_lock.acquire(blocking=False):
+            try:
+                vals = self._read_regs(REG_INIT_STATUS, 3)
+                if vals:
+                    self._init_status = vals[0]
+                    if vals[0] == 1:
+                        self._initialized = True
+                    self._grip_state = vals[1]
+                    self._position = vals[2]
+            except Exception:
+                pass
+            finally:
+                self._modbus_lock.release()
 
+        # Always publish cached state (action server updates these during moves)
         msg = String()
         msg.data = json.dumps({
             'initialized': self._initialized,
@@ -258,8 +269,8 @@ class GripperNode(Node):
 
     def _handle_init(self, request, response):
         try:
-            if self._modbus_index < 0:
-                self._create_modbus()
+            with self._modbus_lock:
+                self._reconnect()
             self._activate_gripper()
             response.success = True
             response.message = 'Gripper initialized'
@@ -301,10 +312,13 @@ class GripperNode(Node):
         force = goal_handle.request.force
         result = Gripper.Result()
 
+        # Write force, speed, position on a fresh connection (matches plugin pattern)
         try:
-            self._write_reg(REG_FORCE, force)
-            self._write_reg(REG_SPEED, speed)
-            self._write_reg(REG_POSITION, position)
+            with self._modbus_lock:
+                self._reconnect()
+                self._write_reg(REG_FORCE, force)
+                self._write_reg(REG_SPEED, speed)
+                self._write_reg(REG_POSITION, position)
         except Exception as e:
             self.get_logger().error(f'Write failed: {e}')
             goal_handle.abort()
@@ -312,6 +326,7 @@ class GripperNode(Node):
             result.message = str(e)
             return result
 
+        # Poll until done
         timeout = self.get_parameter('motion_timeout').value
         feedback = Gripper.Feedback()
         start_time = time.time()
@@ -324,45 +339,45 @@ class GripperNode(Node):
                 return result
 
             try:
-                current_pos = self._read_reg(REG_CURRENT_POS)
-                grip_state = self._read_reg(REG_GRIP_STATE)
+                with self._modbus_lock:
+                    vals = self._read_regs(REG_GRIP_STATE, 2)
             except Exception:
-                await self._sleep(0.1)
+                time.sleep(0.05)
                 continue
 
-            if current_pos is not None:
+            if vals:
+                grip_state, current_pos = vals[0], vals[1]
                 feedback.current_position = current_pos
-                self._position = current_pos
-            if grip_state is not None:
                 feedback.status = grip_state
+                self._position = current_pos
                 self._grip_state = grip_state
-            goal_handle.publish_feedback(feedback)
+                goal_handle.publish_feedback(feedback)
+                # Publish state so WebSocket gets live updates during moves
+                msg = String()
+                msg.data = json.dumps({
+                    'initialized': self._initialized,
+                    'position': current_pos,
+                    'grip_state': grip_state,
+                    'grip_state_name': GRIP_STATE_NAMES.get(grip_state, 'unknown'),
+                })
+                self._state_pub.publish(msg)
 
-            if grip_state is not None and grip_state != 0:
-                goal_handle.succeed()
-                result.success = True
-                result.final_position = current_pos or 0
-                result.status = grip_state
-                messages = {1: 'Position reached', 2: 'Object caught', 3: 'Object dropped'}
-                result.message = messages.get(grip_state, f'Stopped ({grip_state})')
-                self.get_logger().info(f'Done: {result.message} pos={current_pos}')
-                return result
+                if grip_state != 0:
+                    goal_handle.succeed()
+                    result.success = True
+                    result.final_position = current_pos
+                    result.status = grip_state
+                    messages = {1: 'Position reached', 2: 'Object caught', 3: 'Object dropped'}
+                    result.message = messages.get(grip_state, f'Stopped ({grip_state})')
+                    self.get_logger().info(f'Done: {result.message} pos={current_pos}')
+                    return result
 
-            await self._sleep(0.05)
+            time.sleep(0.05)
 
         goal_handle.abort()
         result.success = False
         result.message = 'Timeout'
-        try:
-            result.final_position = self._read_reg(REG_CURRENT_POS) or 0
-            result.status = self._read_reg(REG_GRIP_STATE) or 0
-        except Exception:
-            pass
         return result
-
-    async def _sleep(self, duration):
-        import asyncio
-        await asyncio.sleep(duration)
 
 
 def main(args=None):
