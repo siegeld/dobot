@@ -27,6 +27,7 @@ setup(
         'prompt_toolkit>=3.0.0',
         'fastapi>=0.100.0',
         'uvicorn[standard]>=0.20.0',
+        'requests>=2.28.0',
     ],
     zip_safe=True,
     maintainer='User',

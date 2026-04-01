@@ -474,6 +474,288 @@
       $('#activity-log').innerHTML = '';
     });
 
+    // ── Calibration ──────────────────────────────────────────
+    let calSelectedPx = 320, calSelectedPy = 180;
+    let calRecordedPixels = [];  // [{px, py, index}]
+
+    function calDrawOverlay() {
+      const img = $('#cal-camera-feed');
+      const canvas = $('#cal-overlay');
+      if (!img || !canvas || img.style.display === 'none') return;
+      canvas.width = img.naturalWidth || 640;
+      canvas.height = img.naturalHeight || 360;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw recorded points
+      calRecordedPixels.forEach((pt) => {
+        const x = pt.px, y = pt.py;
+        // Crosshair
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x - 10, y); ctx.lineTo(x + 10, y);
+        ctx.moveTo(x, y - 10); ctx.lineTo(x, y + 10);
+        ctx.stroke();
+        // Label
+        ctx.fillStyle = '#00ff00';
+        ctx.font = 'bold 12px monospace';
+        ctx.fillText(pt.index, x + 12, y - 4);
+      });
+
+      // Draw current selection
+      if (calSelectedPx >= 0) {
+        const x = calSelectedPx, y = calSelectedPy;
+        ctx.strokeStyle = '#ff4444';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(x - 15, y); ctx.lineTo(x + 15, y);
+        ctx.moveTo(x, y - 15); ctx.lineTo(x, y + 15);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    async function calRefreshStatus() {
+      try {
+        const data = await api('calibration/status');
+        const badge = $('#cal-status-badge');
+        $('#cal-num-points').textContent = data.num_points || 0;
+        if (data.solved) {
+          badge.className = 'badge bg-success';
+          badge.textContent = `Calibrated (${data.error_mm}mm)`;
+          $('#cal-error').textContent = data.error_mm + 'mm';
+        } else {
+          badge.className = 'badge bg-secondary';
+          badge.textContent = 'Not Calibrated';
+          $('#cal-error').textContent = '--';
+        }
+        // Point list
+        const list = $('#cal-points-list');
+        if (data.points && data.points.length > 0) {
+          list.innerHTML = data.points.map((p, i) => {
+            const c = p.camera_xyz;
+            const r = p.robot_xyz;
+            const depth = Math.sqrt(c[0]*c[0] + c[1]*c[1] + c[2]*c[2]);
+            const depthIn = depth / 0.0254;
+            return `<div class="text-muted mb-1 d-flex justify-content-between align-items-center">${i+1}. depth=${depth.toFixed(3)}m (${depthIn.toFixed(1)}in) → robot(${r[0].toFixed(1)}, ${r[1].toFixed(1)}, ${r[2].toFixed(1)})mm <i class="bi bi-x-circle text-danger cal-delete-point" role="button" data-index="${i}" style="cursor:pointer; flex-shrink:0;"></i></div>`;
+          }).join('');
+        } else {
+          list.innerHTML = '<div class="text-muted">No points recorded</div>';
+        }
+      } catch(e) { /* ignore */ }
+    }
+
+    function calRefreshFeed() {
+      const img = $('#cal-camera-feed');
+      img.src = '/api/calibration/camera-frame?' + Date.now();
+      img.style.display = 'block';
+      img.onload = calDrawOverlay;
+    }
+
+    $('#btn-cal-refresh-feed').addEventListener('click', calRefreshFeed);
+
+    // Zoom & pan state for camera image
+    let calZoom = 1, calPanX = 0, calPanY = 0, calDragging = false, calDragStart = {};
+
+    function calApplyTransform() {
+      const img = $('#cal-camera-feed');
+      const canvas = $('#cal-overlay');
+      const t = `scale(${calZoom}) translate(${calPanX}px, ${calPanY}px)`;
+      img.style.transform = t;
+      img.style.transformOrigin = '0 0';
+      canvas.style.transform = t;
+      canvas.style.transformOrigin = '0 0';
+    }
+
+    // Scroll wheel to zoom
+    $('#cal-camera-container').addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      const newZoom = Math.max(1, Math.min(8, calZoom * delta));
+      // Zoom toward mouse position
+      const rect = e.currentTarget.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      calPanX -= (mx / calZoom - mx / newZoom);
+      calPanY -= (my / calZoom - my / newZoom);
+      calZoom = newZoom;
+      if (calZoom <= 1) { calPanX = 0; calPanY = 0; }
+      calApplyTransform();
+    }, { passive: false });
+
+    // Left-drag to pan when zoomed, click (no drag) to select pixel
+    let calMouseDownPos = null;
+    $('#cal-camera-container').addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      calMouseDownPos = { x: e.clientX, y: e.clientY };
+      if (calZoom > 1) {
+        calDragging = true;
+        calDragStart = { x: e.clientX - calPanX * calZoom, y: e.clientY - calPanY * calZoom };
+      }
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!calDragging) return;
+      calPanX = (e.clientX - calDragStart.x) / calZoom;
+      calPanY = (e.clientY - calDragStart.y) / calZoom;
+      calApplyTransform();
+    });
+    document.addEventListener('mouseup', (e) => {
+      if (e.button !== 0) return;
+      const wasDrag = calMouseDownPos &&
+        (Math.abs(e.clientX - calMouseDownPos.x) > 3 || Math.abs(e.clientY - calMouseDownPos.y) > 3);
+      calDragging = false;
+      // Only select pixel if it was a click, not a drag
+      if (!wasDrag && calMouseDownPos) {
+        const img = $('#cal-camera-feed');
+        const rect = img.getBoundingClientRect();
+        const scaleX = (img.naturalWidth || 640) / rect.width;
+        const scaleY = (img.naturalHeight || 360) / rect.height;
+        calSelectedPx = Math.round((e.clientX - rect.left) * scaleX);
+        calSelectedPy = Math.round((e.clientY - rect.top) * scaleY);
+        $('#cal-pixel').textContent = `${calSelectedPx}, ${calSelectedPy}`;
+        calDrawOverlay();
+      }
+      calMouseDownPos = null;
+    });
+    $('#cal-camera-container').addEventListener('contextmenu', (e) => e.preventDefault());
+
+    $('#btn-cal-record').addEventListener('click', async () => {
+      logActivity(`Recording calibration point at pixel (${calSelectedPx}, ${calSelectedPy})...`, 'info');
+      const result = await api('calibration/record', 'POST', {
+        px: calSelectedPx, py: calSelectedPy
+      });
+      if (result.success) {
+        const r = result.robot_xyz;
+        calRecordedPixels.push({ px: calSelectedPx, py: calSelectedPy, index: result.total_points });
+        showToast(`Point ${result.total_points} recorded — depth ${result.depth_m}m`, 'success');
+        logActivity(`Cal point ${result.total_points}: robot(${r[0].toFixed(1)},${r[1].toFixed(1)},${r[2].toFixed(1)})mm | depth=${result.depth_m}m stddev=${result.depth_stddev}m`, 'success');
+        calRefreshStatus();
+        calDrawOverlay();
+      } else {
+        showToast(result.error || 'Record failed', 'danger');
+      }
+    });
+
+    $('#btn-cal-solve').addEventListener('click', async () => {
+      const result = await api('calibration/solve', 'POST');
+      if (result.solved) {
+        showToast(`Calibration solved! Error: ${result.error_mm}mm`, 'success');
+        logActivity(`Calibration solved: ${result.num_points} points, error=${result.error_mm}mm`, 'success');
+      } else {
+        showToast(`Need at least 3 points (have ${result.num_points || 0})`, 'warning');
+      }
+      calRefreshStatus();
+    });
+
+    $('#btn-cal-clear').addEventListener('click', async () => {
+      if (!confirm('Clear all calibration points?')) return;
+      await api('calibration/clear', 'POST');
+      calRecordedPixels = [];
+      showToast('Calibration cleared', 'info');
+      calRefreshStatus();
+      calDrawOverlay();
+      $('#cal-test-results').style.display = 'none';
+    });
+
+    $('#btn-cal-test').addEventListener('click', async () => {
+      const result = await api('calibration/test');
+      const div = $('#cal-test-results');
+      if (!result.success) {
+        showToast(result.error || 'Test failed', 'danger');
+        return;
+      }
+      const actual = result.actual_robot_xyz;
+      let html = `<div class="text-info mb-1">Robot at: (${actual[0].toFixed(1)}, ${actual[1].toFixed(1)}, ${actual[2].toFixed(1)})mm</div>`;
+      if (result.objects.length === 0) {
+        html += '<div class="text-muted">No objects detected</div>';
+      }
+      result.objects.forEach(obj => {
+        const r = obj.robot_xyz;
+        const dx = (r[0] - actual[0]).toFixed(1);
+        const dy = (r[1] - actual[1]).toFixed(1);
+        const dz = (r[2] - actual[2]).toFixed(1);
+        const dist = Math.sqrt(dx*dx + dy*dy + dz*dz).toFixed(1);
+        html += `<div>#${obj.id} → (${r[0].toFixed(1)}, ${r[1].toFixed(1)}, ${r[2].toFixed(1)})mm — delta: ${dist}mm (dx=${dx} dy=${dy} dz=${dz})</div>`;
+      });
+      div.innerHTML = html;
+      div.style.display = 'block';
+    });
+
+    // Drag mode toggle
+    let dragActive = false;
+    $('#btn-cal-drag-toggle').addEventListener('click', async () => {
+      if (dragActive) {
+        await api('drag/stop', 'POST');
+        dragActive = false;
+        $('#btn-cal-drag-toggle').className = 'btn btn-outline-warning btn-sm w-100 mb-2';
+        $('#btn-cal-drag-toggle').innerHTML = '<i class="bi bi-hand-index"></i> Enable Drag Mode';
+        showToast('Drag mode off', 'info');
+      } else {
+        const result = await api('drag/start', 'POST');
+        if (result.success) {
+          dragActive = true;
+          $('#btn-cal-drag-toggle').className = 'btn btn-warning btn-sm w-100 mb-2';
+          $('#btn-cal-drag-toggle').innerHTML = '<i class="bi bi-hand-index-fill"></i> Drag Mode ON — move robot by hand';
+          showToast('Drag mode on — move robot by hand', 'success');
+        } else {
+          showToast(result.error || 'Failed to start drag', 'danger');
+        }
+      }
+    });
+
+    // Calibration jog buttons
+    document.querySelectorAll('.cal-jog').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const axis = btn.dataset.axis;
+        const dir = parseInt(btn.dataset.dir);
+        const step = parseInt($('#cal-jog-step').value) * dir;
+        await api('jog', 'POST', { axis, distance: step, speed: state.jogSpeed, mode: 'user' });
+        // Update position display
+        try {
+          const st = await api('status');
+          const c = st.cartesian;
+          $('#cal-robot-pos').textContent = `X:${c[0].toFixed(1)} Y:${c[1].toFixed(1)} Z:${c[2].toFixed(1)}`;
+        } catch(e) {}
+      });
+    });
+
+    // Delete calibration point
+    $('#cal-points-list').addEventListener('click', async (e) => {
+      const el = e.target.closest('.cal-delete-point');
+      if (!el) return;
+      const index = parseInt(el.dataset.index);
+      const result = await api('calibration/delete-point', 'POST', { index });
+      if (result.success) {
+        showToast(`Point deleted (${result.remaining} remaining)`, 'info');
+        calRecordedPixels = calRecordedPixels.filter((_, i) => i !== index);
+        calRefreshStatus();
+        calDrawOverlay();
+      } else {
+        showToast(result.error || 'Delete failed', 'danger');
+      }
+    });
+
+    // Initial calibration status
+    calRefreshStatus();
+
+    // Auto-refresh camera feed when calibration modal is open
+    let calFeedInterval = null;
+    const calModal = document.getElementById('calibrationModal');
+    if (calModal) {
+      calModal.addEventListener('shown.bs.modal', () => {
+        calRefreshFeed();
+        calRefreshStatus();
+        calFeedInterval = setInterval(calRefreshFeed, 1000);
+      });
+      calModal.addEventListener('hidden.bs.modal', () => {
+        clearInterval(calFeedInterval);
+        calFeedInterval = null;
+      });
+    }
+
     // Keyboard
     document.addEventListener('keydown', handleKeyboard);
 

@@ -30,6 +30,8 @@ from dobot_msgs_v4.srv import (
     RelMovLUser,
     RelMovLTool,
     SpeedFactor,
+    StartDrag,
+    StopDrag,
     Stop,
 )
 
@@ -118,6 +120,10 @@ class DobotRosClient(Node):
             SpeedFactor, f'{self._srv_prefix}SpeedFactor')
         self._stop_client = self.create_client(
             Stop, f'{self._srv_prefix}Stop')
+        self._start_drag_client = self.create_client(
+            StartDrag, f'{self._srv_prefix}StartDrag')
+        self._stop_drag_client = self.create_client(
+            StopDrag, f'{self._srv_prefix}StopDrag')
 
         # ── Gripper node clients ────────────────────────────────
         self._gripper_init_client = self.create_client(
@@ -264,6 +270,18 @@ class DobotRosClient(Node):
         """Stop robot motion."""
         request = Stop.Request()
         response = self._call_service(self._stop_client, request)
+        return response.res
+
+    def start_drag(self) -> int:
+        """Enter drag/freedrive mode."""
+        request = StartDrag.Request()
+        response = self._call_service(self._start_drag_client, request)
+        return response.res
+
+    def stop_drag(self) -> int:
+        """Exit drag/freedrive mode."""
+        request = StopDrag.Request()
+        response = self._call_service(self._stop_drag_client, request)
         return response.res
 
     def set_speed_factor(self, speed: int) -> int:

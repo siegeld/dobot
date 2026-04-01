@@ -357,6 +357,106 @@
         </div>
       </div>
 
+      <!-- Calibration trigger button -->
+      <div class="card mb-2">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-crosshair"></i> Calibration</span>
+          <div>
+            <span id="cal-status-badge" class="badge bg-secondary me-2">Not Calibrated</span>
+            <button class="btn btn-outline-info btn-xs" data-bs-toggle="modal" data-bs-target="#calibrationModal">
+              Open
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Calibration Modal -->
+      <div class="modal fade" id="calibrationModal" tabindex="-1" aria-labelledby="calibrationModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+          <div class="modal-content bg-dark text-light">
+            <div class="modal-header py-2">
+              <h6 class="modal-title" id="calibrationModalLabel"><i class="bi bi-crosshair"></i> Camera-to-Robot Calibration</h6>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <div class="row">
+                <!-- Left: camera feed (large) -->
+                <div class="col-8">
+                  <div id="cal-camera-container" style="position:relative; display:inline-block; width:100%; overflow:hidden;">
+                    <img id="cal-camera-feed" src="" alt="Camera view"
+                         class="img-fluid rounded" style="cursor:crosshair; display:none; width:100%;"
+                         title="Click to select pixel for calibration">
+                    <canvas id="cal-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
+                  </div>
+                  <div class="mt-2 d-flex align-items-center gap-3">
+                    <button class="btn btn-outline-info btn-sm" id="btn-cal-refresh-feed">
+                      <i class="bi bi-camera"></i> Refresh View
+                    </button>
+                    <small class="text-muted">Selected pixel: <span id="cal-pixel" class="text-info">--</span></small>
+                  </div>
+                  <!-- Test results -->
+                  <div id="cal-test-results" class="small mt-2" style="display:none;"></div>
+                </div>
+                <!-- Right: controls and points -->
+                <div class="col-4">
+                  <table class="table table-sm table-borderless mb-2 info-table">
+                    <tr><td class="text-muted">Points</td><td id="cal-num-points">0</td></tr>
+                    <tr><td class="text-muted">Error</td><td id="cal-error">--</td></tr>
+                  </table>
+                  <div class="d-grid gap-2 mb-3">
+                    <button class="btn btn-outline-success btn-sm" id="btn-cal-record">
+                      <i class="bi bi-plus-circle"></i> Record Point
+                    </button>
+                    <button class="btn btn-outline-primary btn-sm" id="btn-cal-solve">
+                      <i class="bi bi-calculator"></i> Solve
+                    </button>
+                    <button class="btn btn-outline-info btn-sm" id="btn-cal-test">
+                      <i class="bi bi-bullseye"></i> Test
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm" id="btn-cal-clear">
+                      <i class="bi bi-trash"></i> Clear All
+                    </button>
+                  </div>
+                  <!-- Drag mode -->
+                  <button class="btn btn-outline-warning btn-sm w-100 mb-2" id="btn-cal-drag-toggle">
+                    <i class="bi bi-hand-index"></i> Enable Drag Mode
+                  </button>
+
+                  <!-- Compact jog controls -->
+                  <h6 class="text-muted small mt-2">Jog Robot</h6>
+                  <div class="d-flex gap-1 mb-1">
+                    <button class="btn btn-outline-danger btn-xs flex-fill cal-jog" data-axis="x" data-dir="-1">X-</button>
+                    <button class="btn btn-outline-success btn-xs flex-fill cal-jog" data-axis="x" data-dir="1">X+</button>
+                    <button class="btn btn-outline-danger btn-xs flex-fill cal-jog" data-axis="y" data-dir="-1">Y-</button>
+                    <button class="btn btn-outline-success btn-xs flex-fill cal-jog" data-axis="y" data-dir="1">Y+</button>
+                  </div>
+                  <div class="d-flex gap-1 mb-1">
+                    <button class="btn btn-outline-danger btn-xs flex-fill cal-jog" data-axis="z" data-dir="-1">Z-</button>
+                    <button class="btn btn-outline-success btn-xs flex-fill cal-jog" data-axis="z" data-dir="1">Z+</button>
+                    <button class="btn btn-outline-danger btn-xs flex-fill cal-jog" data-axis="rz" data-dir="-1">RZ-</button>
+                    <button class="btn btn-outline-success btn-xs flex-fill cal-jog" data-axis="rz" data-dir="1">RZ+</button>
+                  </div>
+                  <div class="d-flex align-items-center gap-2 mb-2">
+                    <small class="text-muted">Step:</small>
+                    <select id="cal-jog-step" class="form-select form-select-sm" style="width:auto;">
+                      <option value="1">1mm</option>
+                      <option value="5" selected>5mm</option>
+                      <option value="10">10mm</option>
+                      <option value="25">25mm</option>
+                      <option value="50">50mm</option>
+                    </select>
+                    <small class="text-muted ms-1" id="cal-robot-pos">--</small>
+                  </div>
+
+                  <h6 class="text-muted small">Recorded Points</h6>
+                  <div id="cal-points-list" class="small" style="max-height:200px; overflow-y:auto;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Configuration -->
       <div class="card mb-2">
         <div class="card-header" data-bs-toggle="collapse" data-bs-target="#config-panel" role="button">

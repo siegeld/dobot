@@ -259,6 +259,28 @@ async def stop_robot():
         return {"success": False, "error": str(e)}
 
 
+@app.post("/api/drag/start")
+async def start_drag():
+    """Enter drag/freedrive mode."""
+    try:
+        client = _get_client()
+        res = client.start_drag()
+        return {"success": True, "result": res}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/drag/stop")
+async def stop_drag():
+    """Exit drag/freedrive mode."""
+    try:
+        client = _get_client()
+        res = client.stop_drag()
+        return {"success": True, "result": res}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/api/speed")
 async def set_speed(req: SpeedRequest):
     """Set global speed factor."""
@@ -392,6 +414,182 @@ async def get_config():
             "precision": _config.precision,
         }
     return {}
+
+
+# ── Calibration API (proxies to camera server) ──────────────────
+
+CAMERA_URL = os.environ.get("CAMERA_URL", "http://10.11.6.65:8080")
+
+
+@app.get("/api/calibration/status")
+async def calibration_status():
+    """Get calibration status from camera server."""
+    try:
+        import requests
+        resp = requests.get(f"{CAMERA_URL}/api/calibration", timeout=5)
+        return resp.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/calibration/record")
+async def calibration_record(req: dict = None):
+    """Record a calibration point: robot XYZ + camera 3D at pixel (px, py).
+
+    If px/py provided, uses depth at that pixel. Otherwise uses frame center.
+    """
+    import requests
+    try:
+        client = _get_client()
+        robot_pose = client.get_cartesian_pose()
+        robot_xyz = robot_pose[:3]  # [X, Y, Z] in mm
+
+        px = req.get("px", 320) if req else 320
+        py = req.get("py", 180) if req else 180
+
+        # Use a small region around the clicked pixel for more robust depth
+        patch = 10  # +/- pixels
+        region_resp = requests.get(
+            f"{CAMERA_URL}/api/depth/region",
+            params={"x": px - patch, "y": py - patch,
+                    "width": patch * 2, "height": patch * 2},
+            timeout=5,
+        ).json()
+
+        depth_mean = region_resp.get("depth_mean", 0)
+        valid = region_resp.get("valid_pixels", 0)
+        if depth_mean <= 0 or valid < 10:
+            return {"success": False,
+                    "error": f"No good depth at pixel ({px}, {py}) — {valid} valid pixels"}
+
+        # Log depth quality for debugging
+        stddev = region_resp.get("depth_stddev", 0)
+
+        # Get 3D position at the center pixel
+        point_resp = requests.get(
+            f"{CAMERA_URL}/api/depth/at", params={"x": px, "y": py}, timeout=5
+        ).json()
+
+        distance = point_resp.get("distance", 0)
+        if distance <= 0.1 or distance > 2.0:
+            return {"success": False,
+                    "error": f"Bad depth at ({px}, {py}): {distance:.3f}m — expected 0.1-2.0m"}
+
+        camera_xyz = point_resp["position_3d"]
+        result = requests.post(f"{CAMERA_URL}/api/calibration/point", json={
+            "camera_xyz": camera_xyz,
+            "robot_xyz": robot_xyz,
+        }, timeout=5).json()
+
+        return {
+            "success": True,
+            "robot_xyz": robot_xyz,
+            "camera_xyz": camera_xyz,
+            "depth_m": round(distance, 3),
+            "depth_stddev": round(stddev, 3),
+            "valid_pixels": valid,
+            "total_points": result.get("total_points", 0),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/calibration/solve")
+async def calibration_solve():
+    """Solve the camera-to-robot transform."""
+    try:
+        import requests
+        resp = requests.post(f"{CAMERA_URL}/api/calibration/solve", timeout=10)
+        return resp.json()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/calibration/clear")
+async def calibration_clear():
+    """Clear all calibration points."""
+    try:
+        import requests
+        requests.post(f"{CAMERA_URL}/api/calibration/clear", timeout=5)
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/calibration/delete-point")
+async def calibration_delete_point(req: dict):
+    """Delete a calibration point by index. Re-creates remaining points."""
+    import requests as rq
+    try:
+        index = req.get("index", -1)
+        status = rq.get(f"{CAMERA_URL}/api/calibration", timeout=5).json()
+        points = status.get("points", [])
+        if index < 0 or index >= len(points):
+            return {"success": False, "error": f"Invalid index {index}"}
+        rq.post(f"{CAMERA_URL}/api/calibration/clear", timeout=5)
+        for i, pt in enumerate(points):
+            if i != index:
+                rq.post(f"{CAMERA_URL}/api/calibration/point", json={
+                    "camera_xyz": pt["camera_xyz"],
+                    "robot_xyz": pt["robot_xyz"],
+                }, timeout=5)
+        return {"success": True, "remaining": len(points) - 1}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/calibration/test")
+async def calibration_test():
+    """Test calibration: for each detected object, show predicted robot coords."""
+    import requests
+    try:
+        client = _get_client()
+        robot_pose = client.get_cartesian_pose()
+        actual_xyz = robot_pose[:3]
+
+        objects_resp = requests.get(
+            f"{CAMERA_URL}/api/detection/objects", timeout=5
+        ).json()
+
+        results = []
+        for obj in objects_resp.get("objects", []):
+            try:
+                transform_resp = requests.get(
+                    f"{CAMERA_URL}/api/calibration/transform",
+                    params={"x": obj["position_3d"][0],
+                            "y": obj["position_3d"][1],
+                            "z": obj["position_3d"][2]},
+                    timeout=5,
+                ).json()
+                results.append({
+                    "id": obj["id"],
+                    "label": obj["label"],
+                    "camera_3d": obj["position_3d"],
+                    "robot_xyz": transform_resp["robot_xyz"],
+                    "depth_m": obj["depth_mean"],
+                })
+            except Exception:
+                pass
+
+        return {
+            "success": True,
+            "actual_robot_xyz": actual_xyz,
+            "objects": results,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/calibration/camera-frame")
+async def calibration_camera_frame():
+    """Proxy the detection frame from camera server."""
+    import requests
+    from fastapi.responses import Response
+    try:
+        resp = requests.get(f"{CAMERA_URL}/api/frame/color", timeout=5)
+        return Response(content=resp.content, media_type="image/jpeg")
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ── Camera State ─────────────────────────────────────────────────
