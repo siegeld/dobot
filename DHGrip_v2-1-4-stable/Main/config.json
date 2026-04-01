@@ -1,0 +1,6 @@
+{
+  "name": "DHGrip",
+  "description": "%{tr_dobot_description_dh}",
+  "version": "2-1-4-stable",
+  "hotkey": true
+}

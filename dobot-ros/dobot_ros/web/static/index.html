@@ -259,20 +259,13 @@
         </div>
         <div class="card-body py-2">
           <div class="d-flex gap-2 mb-2">
-            <button class="btn btn-success btn-sm flex-fill" id="btn-enable">
-              <i class="bi bi-play-fill"></i> Enable
-            </button>
-            <button class="btn btn-warning btn-sm flex-fill" id="btn-disable">
-              <i class="bi bi-pause-fill"></i> Disable
-            </button>
+            <button class="btn btn-success btn-sm flex-fill" id="btn-enable">Enable</button>
+            <button class="btn btn-warning btn-sm flex-fill" id="btn-disable">Disable</button>
+            <button class="btn btn-outline-warning btn-sm flex-fill" id="btn-drag-toggle">Drag</button>
           </div>
           <div class="d-flex gap-2 mb-2">
-            <button class="btn btn-info btn-sm flex-fill" id="btn-clear-error">
-              <i class="bi bi-arrow-counterclockwise"></i> Clear Error
-            </button>
-            <button class="btn btn-danger btn-sm flex-fill" id="btn-stop">
-              <i class="bi bi-stop-fill"></i> STOP
-            </button>
+            <button class="btn btn-info btn-sm flex-fill" id="btn-clear-error">Clear Error</button>
+            <button class="btn btn-danger btn-sm flex-fill" id="btn-stop">STOP</button>
           </div>
 
           <!-- Speed Factor -->
@@ -357,15 +350,35 @@
         </div>
       </div>
 
-      <!-- Calibration trigger button -->
+      <!-- Calibration -->
       <div class="card mb-2">
         <div class="card-header d-flex justify-content-between align-items-center">
           <span><i class="bi bi-crosshair"></i> Calibration</span>
           <div>
             <span id="cal-status-badge" class="badge bg-secondary me-2">Not Calibrated</span>
             <button class="btn btn-outline-info btn-xs" data-bs-toggle="modal" data-bs-target="#calibrationModal">
-              Open
+              Setup
             </button>
+          </div>
+        </div>
+        <div class="card-body py-2">
+          <table class="table table-sm table-borderless mb-2 info-table">
+            <tr><td class="text-muted">Table</td><td id="cal-main-table-status">--</td></tr>
+            <tr><td class="text-muted">Size</td><td id="cal-main-table-size">--</td></tr>
+            <tr><td class="text-muted">Camera</td><td id="cal-main-cam-status">--</td></tr>
+          </table>
+          <div class="d-flex gap-1 mb-1">
+            <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="center">Center</button>
+            <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c1">C1</button>
+            <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c2">C2</button>
+            <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c3">C3</button>
+            <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c4">C4</button>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <small class="text-muted">Height:</small>
+            <input type="number" class="form-control form-control-sm" id="cal-main-ws-height"
+                   value="127" min="25" max="500" step="10" style="width:70px;">
+            <small class="text-muted">mm</small>
           </div>
         </div>
       </div>
@@ -375,7 +388,7 @@
         <div class="modal-dialog modal-xl modal-dialog-centered">
           <div class="modal-content bg-dark text-light">
             <div class="modal-header py-2">
-              <h6 class="modal-title" id="calibrationModalLabel"><i class="bi bi-crosshair"></i> Camera-to-Robot Calibration</h6>
+              <h6 class="modal-title" id="calibrationModalLabel"><i class="bi bi-crosshair"></i> Workspace &amp; Camera Calibration</h6>
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
@@ -393,6 +406,7 @@
                       <i class="bi bi-camera"></i> Refresh View
                     </button>
                     <small class="text-muted">Selected pixel: <span id="cal-pixel" class="text-info">--</span></small>
+                    <small class="text-muted ms-2">Depth: <span id="cal-depth-live" class="text-warning">--</span></small>
                   </div>
                   <!-- Test results -->
                   <div id="cal-test-results" class="small mt-2" style="display:none;"></div>
@@ -402,10 +416,40 @@
                   <table class="table table-sm table-borderless mb-2 info-table">
                     <tr><td class="text-muted">Points</td><td id="cal-num-points">0</td></tr>
                     <tr><td class="text-muted">Error</td><td id="cal-error">--</td></tr>
+                    <tr><td class="text-muted">Table Z</td><td id="cal-table-status">--</td></tr>
                   </table>
+                  <div class="d-flex align-items-center gap-2 mb-2">
+                    <small class="text-muted">Min clearance:</small>
+                    <input type="number" class="form-control form-control-sm" id="cal-min-clearance"
+                           value="25" min="0" max="200" step="5" style="width:70px;">
+                    <small class="text-muted">mm</small>
+                    <button class="btn btn-outline-info btn-xs" id="btn-cal-save-clearance">Save</button>
+                  </div>
+                  <h6 class="text-muted small">Table / Workspace</h6>
+                  <div class="d-grid gap-2 mb-2">
+                    <button class="btn btn-outline-warning btn-sm" id="btn-cal-table-point">
+                      <i class="bi bi-arrow-down-square"></i> Record Table Point (<span id="cal-table-count">0</span>/4)
+                    </button>
+                  </div>
+                  <h6 class="text-muted small">Workspace Test</h6>
+                  <div class="d-flex gap-1 mb-1">
+                    <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="center">Center</button>
+                    <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c1">C1</button>
+                    <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c2">C2</button>
+                    <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c3">C3</button>
+                    <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c4">C4</button>
+                  </div>
+                  <div class="d-flex align-items-center gap-2 mb-2">
+                    <small class="text-muted">Height above table:</small>
+                    <input type="number" class="form-control form-control-sm" id="cal-ws-height"
+                           value="127" min="25" max="500" step="10" style="width:70px;">
+                    <small class="text-muted">mm</small>
+                  </div>
+
+                  <h6 class="text-muted small">Camera Calibration</h6>
                   <div class="d-grid gap-2 mb-3">
                     <button class="btn btn-outline-success btn-sm" id="btn-cal-record">
-                      <i class="bi bi-plus-circle"></i> Record Point
+                      <i class="bi bi-plus-circle"></i> Record Camera Point (click pixel first)
                     </button>
                     <button class="btn btn-outline-primary btn-sm" id="btn-cal-solve">
                       <i class="bi bi-calculator"></i> Solve

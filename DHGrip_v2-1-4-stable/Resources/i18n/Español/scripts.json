@@ -1,0 +1,11 @@
+{
+  "tr_dobot_switch_init_dh": "Inicializar la pinza DH",
+  "tr_dobot_switch_control_dh": "Controlar la pinza DH (Parámetro 1: Ancho de la pinza, rango 0-100; Parámetro 2: Fuerza de la pinza, rango 20-100; Parámetro 3: Velocidad de la pinza, rango: 1-100, Parámetro 4: parámetro opcional, tipo de tabla, si isBlock bloquea la ejecución posterior del programa)",
+  "tr_dobot_switch_control_description1_dh": "Ancho de la pinza",
+  "tr_dobot_switch_control_description2_dh": "Fuerza de la pinza",
+  "tr_dobot_switch_control_description3_dh": "Velocidad de la pinza",
+  "tr_dobot_switch_control_width_get_dh": "Obtener el ancho actual de la pinza DH",
+  "tr_dobot_switch_control_get_move_status_dh": "Obtener el estado actual de la pinza DH, \n 0: En movimiento, no se detecta objeto;\n 1: Ha llegado a la ubicación especificada, no se detecta objeto;\n 2: Objeto agarrado;\n 3: Objeto caído.",
+  "tr_dobot_switch_control_get_init_status_dh": "Obtener el estado de inicialización de la pinza DH,\n -1: Inicialización no completada;\n 1: Inicialización completada;\n 2: Inicialización en curso.",
+  "tr_dobot_switch_control_get_err_code_dh": "Obtener el código de error de la pinza DH(Cada código de falla corresponde a una falla diferente; consulte el documento del protocolo DH para obtener más detalles)"
+}

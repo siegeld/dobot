@@ -1,0 +1,8 @@
+{
+  "DOBOTPLUS_DH_INIT": "Inicializar la pinza DH ID %1",
+  "DOBOTPLUS_DH_CONTROL": "Controlar la pinza DH Ancho %1 Fuerza %2 Velocidad %3 ID %4 Sincronizar o no %5",
+  "DOBOTPLUS_DH_WIDTH_GET": "Obtener el ancho actual de la pinza DH ID %1",
+  "DOBOTPLUS_DH_MOVE_STATUS": "Obtener el estado de agarre de la pinza DH ID %1",
+  "DOBOTPLUS_DH_INIT_STATUS": "Obtener el estado de inicialización de la pinza DH ID %1",
+  "DOBOTPLUS_DH_GET_ERR_STATUS": "Obtener el código de error de la pinza DH ID %1"
+}

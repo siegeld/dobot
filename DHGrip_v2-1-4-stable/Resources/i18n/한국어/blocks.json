@@ -1,0 +1,8 @@
+{
+  "DOBOTPLUS_DH_INIT": "DH 클로 ID %1 초기화",
+  "DOBOTPLUS_DH_CONTROL": "DH 클로 컨트롤 너비%1 강도%2 속도%3 ID %4 동기화 여부 %5",
+  "DOBOTPLUS_DH_WIDTH_GET": "DH 클로 현재 너비 ID %1 회득",
+  "DOBOTPLUS_DH_MOVE_STATUS": "DH 클로 잡기 상태 ID %1 회득",
+  "DOBOTPLUS_DH_INIT_STATUS": "DH 클로 초기화 상태 ID %1 회득",
+  "DOBOTPLUS_DH_GET_ERR_STATUS": "DH 클로 오류 코드 ID %1 회득"
+}

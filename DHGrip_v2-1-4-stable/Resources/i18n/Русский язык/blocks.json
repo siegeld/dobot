@@ -1,0 +1,8 @@
+{
+  "DOBOTPLUS_DH_INIT": "Инициализировать ID %1 DH зажима",
+  "DOBOTPLUS_DH_CONTROL": "Управление DH зажимом Ширина%1 Сила %2 Скорость %3 ID %4 Синхронизация или нет %5",
+  "DOBOTPLUS_DH_WIDTH_GET": "Получить ID %1 текущую ширину DH зажима",
+  "DOBOTPLUS_DH_MOVE_STATUS": "Получить ID %1 состояние захвата DH зажима",
+  "DOBOTPLUS_DH_INIT_STATUS": "Получить ID %1 состояние инициализации DH зажима",
+  "DOBOTPLUS_DH_GET_ERR_STATUS": "Получить ID %1 код неисправности DH зажима"
+}

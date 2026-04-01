@@ -381,6 +381,28 @@
     $('#btn-clear-error').addEventListener('click', () => robotCommand('Clear Error', 'clear'));
     $('#btn-stop').addEventListener('click', () => robotCommand('STOP', 'stop'));
 
+    // Main drag toggle
+    let mainDragActive = false;
+    $('#btn-drag-toggle').addEventListener('click', async () => {
+      if (mainDragActive) {
+        await api('drag/stop', 'POST');
+        mainDragActive = false;
+        $('#btn-drag-toggle').className = 'btn btn-outline-warning btn-sm flex-fill';
+        $('#btn-drag-toggle').textContent = 'Drag';
+        showToast('Drag mode off', 'info');
+      } else {
+        const result = await api('drag/start', 'POST');
+        if (result.success) {
+          mainDragActive = true;
+          $('#btn-drag-toggle').className = 'btn btn-warning btn-sm flex-fill';
+          $('#btn-drag-toggle').textContent = 'Drag ON';
+          showToast('Drag mode on', 'success');
+        } else {
+          showToast(result.error || 'Failed', 'danger');
+        }
+      }
+    });
+
     // Speed slider
     const speedSlider = $('#speed-slider');
     speedSlider.addEventListener('input', () => {
@@ -526,10 +548,18 @@
           badge.className = 'badge bg-success';
           badge.textContent = `Calibrated (${data.error_mm}mm)`;
           $('#cal-error').textContent = data.error_mm + 'mm';
+          if ($('#cal-main-cam-status')) {
+            $('#cal-main-cam-status').textContent = `${data.num_points} pts, error=${data.error_mm}mm`;
+            $('#cal-main-cam-status').className = 'text-success';
+          }
         } else {
           badge.className = 'badge bg-secondary';
           badge.textContent = 'Not Calibrated';
           $('#cal-error').textContent = '--';
+          if ($('#cal-main-cam-status')) {
+            $('#cal-main-cam-status').textContent = data.num_points > 0 ? `${data.num_points} pts (not solved)` : 'Not set';
+            $('#cal-main-cam-status').className = 'text-muted';
+          }
         }
         // Point list
         const list = $('#cal-points-list');
@@ -617,21 +647,40 @@
         calSelectedPy = Math.round((e.clientY - rect.top) * scaleY);
         $('#cal-pixel').textContent = `${calSelectedPx}, ${calSelectedPy}`;
         calDrawOverlay();
+        // Live depth polling at selected pixel
+        calStartDepthPolling();
       }
       calMouseDownPos = null;
     });
     $('#cal-camera-container').addEventListener('contextmenu', (e) => e.preventDefault());
 
+    // Table point — robot position only, no camera
+    $('#btn-cal-table-point').addEventListener('click', async () => {
+      const result = await api('calibration/table/point', 'POST');
+      if (result.success) {
+        const p = result.point;
+        showToast(`Table point ${result.num_points}: Z=${p[2].toFixed(1)}mm`, 'success');
+        logActivity(`Table point ${result.num_points}: (${p[0].toFixed(1)}, ${p[1].toFixed(1)}, ${p[2].toFixed(1)})mm`, 'success');
+        if (result.plane) {
+          logActivity(`Table plane solved: mean Z=${result.plane.mean_z.toFixed(1)}mm`, 'success');
+        }
+        calRefreshTable();
+      } else {
+        showToast(result.error || 'Failed', 'danger');
+      }
+    });
+
+    // Camera calibration point — needs pixel click + robot position
     $('#btn-cal-record').addEventListener('click', async () => {
-      logActivity(`Recording calibration point at pixel (${calSelectedPx}, ${calSelectedPy})...`, 'info');
+      logActivity(`Recording camera point at pixel (${calSelectedPx}, ${calSelectedPy})...`, 'info');
       const result = await api('calibration/record', 'POST', {
         px: calSelectedPx, py: calSelectedPy
       });
       if (result.success) {
         const r = result.robot_xyz;
         calRecordedPixels.push({ px: calSelectedPx, py: calSelectedPy, index: result.total_points });
-        showToast(`Point ${result.total_points} recorded — depth ${result.depth_m}m`, 'success');
-        logActivity(`Cal point ${result.total_points}: robot(${r[0].toFixed(1)},${r[1].toFixed(1)},${r[2].toFixed(1)})mm | depth=${result.depth_m}m stddev=${result.depth_stddev}m`, 'success');
+        showToast(`Camera point ${result.total_points} recorded — depth ${result.depth_m}m`, 'success');
+        logActivity(`Camera point ${result.total_points}: robot(${r[0].toFixed(1)},${r[1].toFixed(1)},${r[2].toFixed(1)})mm | depth=${result.depth_m}m`, 'success');
         calRefreshStatus();
         calDrawOverlay();
       } else {
@@ -651,11 +700,13 @@
     });
 
     $('#btn-cal-clear').addEventListener('click', async () => {
-      if (!confirm('Clear all calibration points?')) return;
+      if (!confirm('Clear all workspace and calibration data?')) return;
       await api('calibration/clear', 'POST');
+      await api('calibration/table/clear', 'POST');
       calRecordedPixels = [];
-      showToast('Calibration cleared', 'info');
+      showToast('All calibration cleared', 'info');
       calRefreshStatus();
+      calRefreshTable();
       calDrawOverlay();
       $('#cal-test-results').style.display = 'none';
     });
@@ -722,6 +773,115 @@
       });
     });
 
+    // Live depth polling at selected pixel
+    let calDepthInterval = null;
+    function calStartDepthPolling() {
+      if (calDepthInterval) clearInterval(calDepthInterval);
+      calPollDepth();
+      calDepthInterval = setInterval(calPollDepth, 500);
+    }
+    async function calPollDepth() {
+      try {
+        const resp = await fetch(`/api/calibration/depth-at?x=${calSelectedPx}&y=${calSelectedPy}`);
+        const data = await resp.json();
+        const d = data.distance || 0;
+        const inches = d / 0.0254;
+        const el = $('#cal-depth-live');
+        if (d > 0) {
+          el.textContent = `${d.toFixed(3)}m (${inches.toFixed(1)}in)`;
+          el.className = d > 2.0 ? 'text-danger' : 'text-warning';
+        } else {
+          el.textContent = 'no depth';
+          el.className = 'text-danger';
+        }
+      } catch(e) {
+        $('#cal-depth-live').textContent = 'err';
+      }
+    }
+
+    // Table plane calibration
+    async function calRefreshTable() {
+      try {
+        const data = await api('calibration/table');
+        const count = (data.points || []).length;
+        $('#cal-table-count').textContent = count;
+        $('#cal-min-clearance').value = data.min_clearance_mm || 25;
+
+        // Modal status
+        if (data.plane) {
+          const clearance = data.min_clearance_mm || 25;
+          $('#cal-table-status').textContent = `${count} pts, Z=${data.plane.mean_z.toFixed(1)}mm, clearance=${clearance}mm`;
+          $('#cal-table-status').className = 'text-success';
+        } else {
+          $('#cal-table-status').textContent = count > 0 ? `${count}/3 points` : '--';
+          $('#cal-table-status').className = '';
+        }
+
+        // Main card status
+        const mainTable = $('#cal-main-table-status');
+        const mainSize = $('#cal-main-table-size');
+        if (mainTable) {
+          if (data.plane) {
+            mainTable.textContent = `${count} pts, Z=${data.plane.mean_z.toFixed(1)}mm`;
+            mainTable.className = 'text-success';
+          } else {
+            mainTable.textContent = count > 0 ? `${count} points (need 3+)` : 'Not set';
+            mainTable.className = 'text-muted';
+          }
+        }
+        if (mainSize && data.points && data.points.length >= 2) {
+          const xs = data.points.map(p => p[0]);
+          const ys = data.points.map(p => p[1]);
+          const xRange = Math.max(...xs) - Math.min(...xs);
+          const yRange = Math.max(...ys) - Math.min(...ys);
+          mainSize.textContent = `${xRange.toFixed(0)} x ${yRange.toFixed(0)} mm (${(xRange/25.4).toFixed(1)} x ${(yRange/25.4).toFixed(1)} in)`;
+        } else if (mainSize) {
+          mainSize.textContent = '--';
+        }
+      } catch(e) {}
+    }
+
+    // Workspace test moves with countdown
+    document.querySelectorAll('.cal-ws-move').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const pos = btn.dataset.pos;
+        // Read height from whichever input is visible (modal or main card)
+        const modalHeight = $('#cal-ws-height');
+        const mainHeight = $('#cal-main-ws-height');
+        const height = parseInt((modalHeight && modalHeight.offsetParent !== null ? modalHeight : mainHeight || modalHeight).value);
+        // Disable all move buttons during countdown
+        document.querySelectorAll('.cal-ws-move').forEach(b => b.disabled = true);
+        for (let i = 5; i > 0; i--) {
+          showToast(`Moving to ${pos} in ${i}...`, 'warning');
+          logActivity(`Moving to ${pos} in ${i}...`, 'info');
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        logActivity(`Moving to ${pos} at ${height}mm above table`, 'info');
+        const result = await api('calibration/workspace-move', 'POST', {
+          position: pos, height_mm: height
+        });
+        document.querySelectorAll('.cal-ws-move').forEach(b => b.disabled = false);
+        if (result.success) {
+          const t = result.target;
+          showToast(`Moving to ${pos}: (${t[0].toFixed(0)}, ${t[1].toFixed(0)}, ${t[2].toFixed(0)})mm`, 'success');
+          logActivity(`Target: (${t[0].toFixed(1)}, ${t[1].toFixed(1)}, ${t[2].toFixed(1)})mm, table Z=${result.table_z}mm`, 'success');
+        } else {
+          showToast(result.error || 'Move failed', 'danger');
+        }
+      });
+    });
+
+    $('#btn-cal-save-clearance').addEventListener('click', async () => {
+      const val = parseInt($('#cal-min-clearance').value);
+      const result = await api('calibration/table/clearance', 'POST', { min_clearance_mm: val });
+      if (result.success) {
+        showToast(`Min clearance set to ${val}mm`, 'success');
+        calRefreshTable();
+      }
+    });
+
+    calRefreshTable();
+
     // Delete calibration point
     $('#cal-points-list').addEventListener('click', async (e) => {
       const el = e.target.closest('.cal-delete-point');
@@ -753,6 +913,8 @@
       calModal.addEventListener('hidden.bs.modal', () => {
         clearInterval(calFeedInterval);
         calFeedInterval = null;
+        clearInterval(calDepthInterval);
+        calDepthInterval = null;
       });
     }
 

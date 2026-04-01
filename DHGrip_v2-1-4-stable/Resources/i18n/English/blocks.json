@@ -1,0 +1,8 @@
+{
+  "DOBOTPLUS_DH_INIT": "Initialize DH gripper ID %1",
+  "DOBOTPLUS_DH_CONTROL": "Control DH gripper width %1 force %2 speed %3 ID %4 sync %5",
+  "DOBOTPLUS_DH_WIDTH_GET": "Get DH gripper current width ID %1",
+  "DOBOTPLUS_DH_MOVE_STATUS": "Get DH gripper gripping status ID %1",
+  "DOBOTPLUS_DH_INIT_STATUS": "Get DH gripper initialization status ID %1",
+  "DOBOTPLUS_DH_GET_ERR_STATUS": "Get DH gripper error code ID %1"
+}

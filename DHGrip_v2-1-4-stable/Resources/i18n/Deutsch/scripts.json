@@ -1,0 +1,11 @@
+{
+  "tr_dobot_switch_init_dh": "DH-Greifer initialisieren",
+  "tr_dobot_switch_control_dh": "Steuerung DH Greifer (Parameter 1: Greiferbreite, Bereich 0-100; Parameter 2: Greiferkraft, Bereich 20-100; Parameter 3: Greifergeschwindigkeit, Bereich 1-100, Parameter 4: Optionaler Parameter, Tabellentyp, ob isBlock die nachfolgende Programmausführung blockiert)",
+  "tr_dobot_switch_control_description1_dh": "Klauenbreite",
+  "tr_dobot_switch_control_description2_dh": "Klemmkraft",
+  "tr_dobot_switch_control_description3_dh": "Spanngeschwindigkeit",
+  "tr_dobot_switch_control_width_get_dh": "Ermitteln der aktuellen Breite des DH Greifers",
+  "tr_dobot_switch_control_get_move_status_dh": "Erhalten Sie den aktuellen Status des DH Greifers\n 0: in Bewegung, kein Objekt erkannt; \n 1: Die angegebene Position wurde erreicht und kein Objekt wurde erkannt; \n 2: Greifen von Objekten;\n 3: Fallende Objekte.\n",
+  "tr_dobot_switch_control_get_init_status_dh": "Erhaltung des DH-Greifer-Initialisierungsstatus\n -1: Initialisierung nicht abgeschlossen; \n 1: Initialisierung abgeschlossen; \n 2: Initialisierung. \n",
+  "tr_dobot_switch_control_get_err_code_dh": "Fehlercodes für DH-Greifer abrufen(Jeder Fehlercode entspricht einem anderen Fehler. Weitere Informationen finden Sie im DH-Protokolldokument.)"
+}

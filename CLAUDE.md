@@ -71,6 +71,28 @@ The C++ driver connects to the robot on two ports: 29999 (commands) and 30004 (r
 
 **Auto-recovery**: The web dashboard's poll thread monitors the `header.stamp` of `/joint_states_robot` messages. If the timestamp stops advancing for 5 seconds, it signals the driver to restart by touching `/tmp/dobot-shared/driver_restart` (a shared Docker volume). The driver's wrapper loop detects the signal file, kills the ROS node, and relaunches it — all without restarting the container.
 
+## Gripper Model
+
+DH Robotics **AG-105** (not AG-95 as originally assumed). 105mm stroke, same Modbus register map as AG-95. Flange-to-gripper-tip distance: **203mm (8 inches)**.
+
+**Tool offset**: Setting `SetTool(1, {0,0,203,0,0,0})` + `Tool(1)` on the Dobot triggers workspace protection errors (error 1479) because the TCP Z drops below the robot's floor protection limit. The workspace protection limits need to be adjusted in Dobot Studio before the tool offset can be used. Until then, the gripper length must be accounted for in software (table calibration records wrist Z when gripper tip touches the table, so the offset is implicit).
+
+## Calibration
+
+Two independent calibrations stored on the robot web server:
+
+**Workspace / Table plane** (`table_plane.json`):
+- 4 corner points recorded by touching gripper tip to table corners
+- Defines the table plane (for safe Z) and workspace XY bounds
+- Min clearance setting prevents gripper from going closer than N mm to table
+- Workspace test moves: Center, C1-C4 at configurable height above table
+
+**Camera-to-robot transform** (stored on camera server at `calibration.json`):
+- Point correspondences: click pixel in camera image + record robot XYZ
+- Solved via SVD (Kabsch algorithm) on camera server
+- Camera depth noise is ~±38mm at working distance — XY is reliable, Z is not
+- For picking: use camera for XY, use table plane for Z
+
 ## Robot Modes
 
 The mode values from the feedback port (used in the web dashboard):

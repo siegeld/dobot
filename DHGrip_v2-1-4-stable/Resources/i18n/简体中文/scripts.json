@@ -1,0 +1,11 @@
+{
+  "tr_dobot_switch_init_dh": "初始化DH夹爪",
+  "tr_dobot_switch_control_dh": "控制DH夹爪(参数1: 夹爪宽度,范围0-100；参数2：夹爪力度，范围20-100；参数3：夹爪速度，范围：1-100, 参数4：可选参数，table类型, isBlock是否阻塞后续程序运行)",
+  "tr_dobot_switch_control_description1_dh": "夹爪宽度",
+  "tr_dobot_switch_control_description2_dh": "夹爪力度",
+  "tr_dobot_switch_control_description3_dh": "夹爪速度",
+  "tr_dobot_switch_control_width_get_dh": "获取DH夹爪的当前宽度",
+  "tr_dobot_switch_control_get_move_status_dh": "获取DH夹爪当前状态,\n 0:运动中，未检测到物体; \n 1:已到达指定位置，未检测到物体；\n 2:抓取到物体；\n 3:物体掉落。\n",
+  "tr_dobot_switch_control_get_init_status_dh": "获取DH夹爪初始化状态,\n -1:初始化未完成; \n 1:初始化已完成；\n 2:初始化中。\n",
+  "tr_dobot_switch_control_get_err_code_dh": "获取DH夹爪故障码（每个故障码对应不同故障，具体查看DH协议文档）"
+}

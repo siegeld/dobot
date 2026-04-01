@@ -1,0 +1,8 @@
+{
+  "DOBOTPLUS_DH_INIT": "DH グリッパー ID %1 を初期化します",
+  "DOBOTPLUS_DH_CONTROL": "DH クランプジョー幅 %1 強度 %2 速度 %3 ID %4 同期しているかどうかを制御 %5",
+  "DOBOTPLUS_DH_WIDTH_GET": "DH グリッパー ID %1 の現在の幅を取得します",
+  "DOBOTPLUS_DH_MOVE_STATUS": "DH グリッパーのグラブ状態 ID %1 を取得",
+  "DOBOTPLUS_DH_INIT_STATUS": "DH グリッパー初期化ステータス ID %1 を取得",
+  "DOBOTPLUS_DH_GET_ERR_STATUS": "DH グリッパー障害コード ID %1 を取得"
+ }

@@ -1,0 +1,150 @@
+[
+  {
+    "block_name": "DHGripInit",
+    "block_color": "#4D7DDD",
+    "block_type": "shape_statement",
+    "block_configs": [
+      {
+        "message": "DOBOTPLUS_DH_INIT",
+        "params": [
+          {
+            "param_type": "input_value",
+            "data_type": "math_number",
+            "name": "id",
+            "default": "1"
+          }
+        ]
+      }
+    ],
+    "block_code": ["DHGripInit({id={id}})\n"]
+  },
+  {
+    "block_name": "DHGripControl",
+    "block_color": "#4D7DDD",
+    "block_type": "shape_statement",
+    "block_configs": [
+      {
+        "message": "DOBOTPLUS_DH_CONTROL",
+        "params": [
+          {
+            "param_type": "input_value",
+            "data_type": "math_number",
+            "name": "width",
+            "default": "0"
+          },
+          {
+            "param_type": "input_value",
+            "data_type": "math_number",
+            "name": "force",
+            "default": "20"
+          },
+          {
+            "param_type": "input_value",
+            "data_type": "math_number",
+            "name": "speed",
+            "default": "1"
+          },
+          {
+            "param_type": "input_value",
+            "data_type": "math_number",
+            "name": "id",
+            "default": "1"
+          },
+          {
+            "param_type": "field_dropdown",
+            "data_type": "",
+            "name": "isBlock",
+            "default": "",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "block_code": ["DHGripControl({width},{force},{speed},{id={id},isBlock={isBlock}})\n"]
+  },
+  {
+    "block_name": "DHGripWidthGet",
+    "block_color": "#4D7DDD",
+    "block_type": "output_string",
+    "block_configs": [
+      {
+        "message": "DOBOTPLUS_DH_WIDTH_GET",
+        "params": [
+          {
+            "param_type": "input_value",
+            "data_type": "math_number",
+            "name": "id",
+            "default": "1"
+          }
+        ]
+      }
+    ],
+    "block_code": ["DHGripWidthGet({id={id}})"]
+  },
+  {
+    "block_name": "DHGripMoveStatus",
+    "block_color": "#4D7DDD",
+    "block_type": "output_string",
+    "block_configs": [
+      {
+        "message": "DOBOTPLUS_DH_MOVE_STATUS",
+        "params": [
+          {
+            "param_type": "input_value",
+            "data_type": "math_number",
+            "name": "id",
+            "default": "1"
+          }
+        ]
+      }
+    ],
+    "block_code": ["DHGripMoveStatus({id={id}})"]
+  },
+  {
+    "block_name": "DHGripInitStatus",
+    "block_color": "#4D7DDD",
+    "block_type": "output_string",
+    "block_configs": [
+      {
+        "message": "DOBOTPLUS_DH_INIT_STATUS",
+        "params": [
+          {
+            "param_type": "input_value",
+            "data_type": "math_number",
+            "name": "id",
+            "default": "1"
+          }
+        ]
+      }
+    ],
+    "block_code": ["DHGripInitStatus({id={id}})"]
+  },
+  {
+    "block_name": "DHGripErrStatus",
+    "block_color": "#4D7DDD",
+    "block_type": "output_string",
+    "block_configs": [
+      {
+        "message": "DOBOTPLUS_DH_GET_ERR_STATUS",
+        "params": [
+          {
+            "param_type": "input_value",
+            "data_type": "math_number",
+            "name": "id",
+            "default": "1"
+          }
+        ]
+      }
+    ],
+    "block_code": ["DHGripErrStatus({id={id}})"]
+  }
+]

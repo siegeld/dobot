@@ -1,0 +1,32 @@
+[
+  {
+    "script_name": "DHGripInit",
+    "message": "%{tr_dobot_switch_init_dh}",
+    "script_code": "DHGripInit({id = 1})"
+  },
+  {
+    "script_name": "DHGripControl",
+    "message": "%{tr_dobot_switch_control_dh}",
+    "script_code": "DHGripControl(0, 20, 1, {id = 1, isBlock = true})"
+  },
+  {
+    "script_name": "DHGripWidthGet",
+    "message": "%{tr_dobot_switch_control_width_get_dh}",
+    "script_code": "DHGripWidthGet({id = 1})"
+  },
+  {
+    "script_name": "DHGripMoveStatus",
+    "message": "%{tr_dobot_switch_control_get_move_status_dh}",
+    "script_code": "DHGripMoveStatus({id = 1})"
+  },
+  {
+    "script_name": "DHGripInitStatus",
+    "message": "%{tr_dobot_switch_control_get_init_status_dh}",
+    "script_code": "DHGripInitStatus({id = 1})"
+  },
+  {
+    "script_name": "DHGripErrStatus",
+    "message": "%{tr_dobot_switch_control_get_err_code_dh}",
+    "script_code": "DHGripErrStatus({id = 1})"
+  }
+]

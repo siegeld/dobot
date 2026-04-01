@@ -292,6 +292,22 @@ class DobotRosClient(Node):
         response = self._call_service(self._speed_factor_client, request)
         return response.res
 
+    def move_pose(self, pose: List[float]) -> int:
+        """Move to cartesian pose [X, Y, Z, RX, RY, RZ] using MovJ."""
+        if len(pose) != 6:
+            raise ValueError("Must provide [X, Y, Z, RX, RY, RZ]")
+        request = MovJ.Request()
+        request.mode = False  # Cartesian mode
+        request.a = float(pose[0])
+        request.b = float(pose[1])
+        request.c = float(pose[2])
+        request.d = float(pose[3])
+        request.e = float(pose[4])
+        request.f = float(pose[5])
+        request.param_value = []
+        response = self._call_service(self._movj_client, request)
+        return response.res
+
     def move_joints(self, angles: List[float], wait: bool = False, tolerance: float = 0.5) -> int:
         """Move to absolute joint angles."""
         if len(angles) != 6:

@@ -1,0 +1,11 @@
+{
+  "tr_dobot_switch_init_dh": "Initialize DH gripper",
+  "tr_dobot_switch_control_dh": "Control DH gripper (parameter1: width, range: 0~100; parameter2: force torque, range: 20~100; parameter3: speed, range: 1~100, Parameter 4: Optional parameter, table type, whether isBlock blocks subsequent program execution)",
+  "tr_dobot_switch_control_description1_dh": "Width ",
+  "tr_dobot_switch_control_description2_dh": "Force torque",
+  "tr_dobot_switch_control_description3_dh": "Speed",
+  "tr_dobot_switch_control_width_get_dh": "Get DH gripper current width",
+  "tr_dobot_switch_control_get_move_status_dh": "Get DH gripper current status,\n 0: in motion, no object detected; \n 1: reached specified position, no object detected\n 2: gripped object\n 3: object dropped\n",
+  "tr_dobot_switch_control_get_init_status_dh": "Get DH gripper initialization status,\n -1: initialization uncompleted; \n 1: initialization completed\n 2: initializing\n",
+  "tr_dobot_switch_control_get_err_code_dh": "Get DH gripper error code(Each fault code corresponds to a different fault, please check the DH protocol document for details)"
+}

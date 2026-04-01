@@ -1,0 +1,11 @@
+{
+  "tr_dobot_switch_init_dh": "DH 클로 초기화",
+  "tr_dobot_switch_control_dh": "DH 클로 제어(매개변수 1: 클로 너비, 범위 0-100; 매개변수 2: 클로 강도, 범위 20-100; 매개변수 3: 클로 속도, 범위: 1-100,, 매개변수 4: 선택적 매개변수, 테이블 유형, isBlock이 후속 프로그램 실행을 차단하는지 여부)",
+  "tr_dobot_switch_control_description1_dh": "클로 너비",
+  "tr_dobot_switch_control_description2_dh": "클로 강도",
+  "tr_dobot_switch_control_description3_dh": "클로 속도",
+  "tr_dobot_switch_control_width_get_dh": "DH 클로의 현재 너비 화득",
+  "tr_dobot_switch_control_get_move_status_dh": "DH 클로 현재 상태 회득,\n 0: 움직이는 중, 물체를 감지하지 못한다;\n 1: 지정된 위치에 도달한다, 물체를 감지하지 못한다;\n 2: 물체를 잡는다;\n 3: 물체가 떨어진다 .",
+  "tr_dobot_switch_control_get_init_status_dh": "DH 클로 초기화 상태 회득,\n -1: 초기화 미완료;\n 1: 초기화 완료;\n 2: 초기화 중.",
+  "tr_dobot_switch_control_get_err_code_dh": "DH 오류 코드 회득(각 오류 코드는 서로 다른 오류에 해당합니다. 자세한 내용은 DH 계약 문서를 참조하세요.)"
+}

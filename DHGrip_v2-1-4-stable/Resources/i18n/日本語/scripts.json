@@ -1,0 +1,11 @@
+{
+  "tr_dobot_switch_init_dh": "DHグリッパの初期化",
+  "tr_dobot_switch_control_dh": "DHグリッパを制御する（パラメータ1：グリッパ幅、範囲0-100、パラメータ2：グリッパ強度、範囲20-100、パラメータ3：グリッパ速度、範囲：1-100、パラメータ 4: オプションのパラメータ、テーブル タイプ、isBlock が後続のプログラムの実行をブロックするかどうか）",
+  "tr_dobot_switch_control_description1_dh": "グリッパ幅",
+  "tr_dobot_switch_control_description2_dh": "グリップ力度",
+  "tr_dobot_switch_control_description3_dh": "グリップ速度",
+  "tr_dobot_switch_control_width_get_dh": "DHグリッパの現在の幅を取得する",
+  "tr_dobot_switch_control_get_move_status_dh": "DHグリッパの現在の状態を取得し\n 0：運動中、物体が検出されなかった\n 1：指定された位置に到達し、物体が検出されなかった\n 2：物体をつかむ\n 3：物が落ちる。\n",
+  "tr_dobot_switch_control_get_init_status_dh": "DHグリップ初期化状態を取得し\n -1:初期化が完了していません\n 1：初期化が完了しました\n 2：初期化中。\n",
+  "tr_dobot_switch_control_get_err_code_dh": "DHグリッパ故障コード取得(各障害コードは異なる障害に対応しています。詳細については、DH プロトコルのドキュメントを確認してください)"
+}

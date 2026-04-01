@@ -1,0 +1,8 @@
+{
+  "DOBOTPLUS_DH_INIT": "初始化DH夹爪 ID %1",
+  "DOBOTPLUS_DH_CONTROL": "控制DH夹爪 宽度%1 力度%2 速度%3 ID %4 是否同步 %5",
+  "DOBOTPLUS_DH_WIDTH_GET": "获取DH夹爪当前宽度 ID %1",
+  "DOBOTPLUS_DH_MOVE_STATUS": "获取DH夹爪抓取状态 ID %1",
+  "DOBOTPLUS_DH_INIT_STATUS": "获取DH夹爪初始化状态 ID %1",
+  "DOBOTPLUS_DH_GET_ERR_STATUS": "获取DH夹爪故障码 ID %1"
+}

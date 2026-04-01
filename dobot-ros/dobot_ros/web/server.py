@@ -592,6 +592,145 @@ async def calibration_camera_frame():
         return {"error": str(e)}
 
 
+_TABLE_FILE = Path(__file__).parent / "table_plane.json"
+
+
+@app.get("/api/calibration/table")
+async def get_table():
+    """Get saved table plane data."""
+    try:
+        if _TABLE_FILE.exists():
+            return json.loads(_TABLE_FILE.read_text())
+    except Exception:
+        pass
+    return {"points": [], "plane": None, "min_clearance_mm": 25}
+
+
+@app.post("/api/calibration/table/clearance")
+async def set_table_clearance(req: dict):
+    """Set minimum clearance above table in mm."""
+    try:
+        data = json.loads(_TABLE_FILE.read_text()) if _TABLE_FILE.exists() else {"points": [], "plane": None}
+        data["min_clearance_mm"] = req.get("min_clearance_mm", 25)
+        _TABLE_FILE.write_text(json.dumps(data, indent=2))
+        return {"success": True, "min_clearance_mm": data["min_clearance_mm"]}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/calibration/table/point")
+async def add_table_point():
+    """Record a table point from current robot Z position."""
+    try:
+        client = _get_client()
+        pose = client.get_cartesian_pose()
+        xyz = pose[:3]
+
+        data = json.loads(_TABLE_FILE.read_text()) if _TABLE_FILE.exists() else {"points": [], "plane": None}
+        data["points"].append(xyz)
+
+        # Solve plane if we have 3+ points
+        if len(data["points"]) >= 3:
+            import numpy as np
+            pts = np.array(data["points"])
+            # Fit plane: ax + by + cz + d = 0 using SVD
+            centroid = pts.mean(axis=0)
+            centered = pts - centroid
+            _, _, Vt = np.linalg.svd(centered)
+            normal = Vt[-1]
+            # Ensure normal points up (positive Z component)
+            if normal[2] < 0:
+                normal = -normal
+            d = -normal.dot(centroid)
+            data["plane"] = {
+                "normal": normal.tolist(),
+                "d": float(d),
+                "z_at_origin": float(-d / normal[2]) if abs(normal[2]) > 0.001 else None,
+                "mean_z": float(pts[:, 2].mean()),
+            }
+
+        _TABLE_FILE.write_text(json.dumps(data, indent=2))
+        return {"success": True, "num_points": len(data["points"]), "point": xyz, "plane": data.get("plane")}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/calibration/table/clear")
+async def clear_table():
+    """Clear table plane data."""
+    try:
+        _TABLE_FILE.write_text(json.dumps({"points": [], "plane": None}))
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/calibration/workspace-move")
+async def workspace_move(req: dict):
+    """Move robot to a workspace position (center or corner) at given height above table."""
+    try:
+        data = json.loads(_TABLE_FILE.read_text()) if _TABLE_FILE.exists() else {}
+        pts = data.get("points", [])
+        plane = data.get("plane")
+        if len(pts) < 3 or not plane:
+            return {"success": False, "error": "Need at least 3 table points"}
+
+        pos = req.get("position", "center")
+        height_mm = req.get("height_mm", 127)
+
+        import numpy as np
+        pts_arr = np.array(pts)
+
+        if pos == "center":
+            target_xy = pts_arr[:, :2].mean(axis=0)
+        elif pos in ("c1", "c2", "c3", "c4"):
+            idx = int(pos[1]) - 1
+            if idx >= len(pts):
+                return {"success": False, "error": f"Corner {pos} not recorded"}
+            target_xy = pts_arr[idx, :2]
+        else:
+            return {"success": False, "error": f"Unknown position: {pos}"}
+
+        # Compute table Z at this XY using plane equation
+        normal = np.array(plane["normal"])
+        d = plane["d"]
+        # ax + by + cz + d = 0 => z = -(ax + by + d) / c
+        table_z = -(normal[0] * target_xy[0] + normal[1] * target_xy[1] + d) / normal[2]
+        target_z = table_z + height_mm
+
+        client = _get_client()
+        client.set_speed_factor(5)
+
+        # height_mm is above table for gripper tip
+        # Table Z is in wrist coords (gripper tip touches table at this Z)
+        # So wrist target = table_z + height_mm (no gripper offset needed
+        # because table was calibrated by touching gripper tip to table)
+        current = client.get_cartesian_pose()
+        dx = float(target_xy[0]) - current[0]
+        dy = float(target_xy[1]) - current[1]
+        dz = float(target_z) - current[2]
+        client.jog(x=dx, y=dy, z=dz)
+
+        return {
+            "success": True,
+            "target": [float(target_xy[0]), float(target_xy[1]), float(target_z)],
+            "table_z": round(float(table_z), 1),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/calibration/depth-at")
+async def calibration_depth_at(x: int, y: int):
+    """Get depth at a pixel from camera server."""
+    import requests
+    try:
+        resp = requests.get(f"{CAMERA_URL}/api/depth/at", params={"x": x, "y": y}, timeout=2).json()
+        return resp
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── Camera State ─────────────────────────────────────────────────
 
 _CAMERA_FILE = Path(__file__).parent / "camera_state.json"
