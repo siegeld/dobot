@@ -6,7 +6,9 @@ Provides REST API + WebSocket for real-time monitoring and control.
 
 import asyncio
 import json
+import logging
 import math
+import subprocess
 import time
 import threading
 from contextlib import asynccontextmanager
@@ -98,6 +100,15 @@ def _poll_state():
                 _state["gripper_initialized"] = client.gripper_get_init_status() == 1
         except Exception:
             _state["connected"] = False
+        # Watchdog: if feedback port (30004) is dead, kill the driver node
+        # so the restart loop in the container relaunches it
+        try:
+            if client.is_feedback_stale(max_age=5.0):
+                logging.warning('Feedback port stale — signaling driver restart')
+                Path('/tmp/dobot-shared/driver_restart').touch()
+                time.sleep(10)  # wait for driver to restart
+        except Exception:
+            pass
         time.sleep(0.2)  # 5 Hz
 
 
@@ -170,10 +181,10 @@ async def get_status():
     with _lock:
         uptime = time.time() - _state["uptime_start"] if _state["uptime_start"] else 0
         mode_names = {
-            1: "INIT", 2: "BRAKE_OPEN", 3: "DISABLED",
-            4: "ENABLE", 5: "BACKDRIVE", 6: "RUNNING",
-            7: "RECORDING", 8: "ERROR", 9: "PAUSE",
-            10: "JOG", 11: "TEACH",
+            1: "INIT", 2: "BRAKE_OPEN", 3: "POWEROFF",
+            4: "DISABLED", 5: "ENABLE", 6: "BACKDRIVE",
+            7: "RUNNING", 8: "SINGLE_STEP", 9: "ERROR",
+            10: "PAUSE", 11: "COLLISION",
         }
         return {
             "connected": _state["connected"],
@@ -313,7 +324,7 @@ async def gripper_init():
 
 
 @app.post("/api/gripper/open")
-async def gripper_open(speed: int = 50, force: int = 50):
+async def gripper_open(speed: int = 100, force: int = 20):
     """Open the gripper (fire-and-forget, state updates via WebSocket)."""
     try:
         client = _get_client()
@@ -324,7 +335,7 @@ async def gripper_open(speed: int = 50, force: int = 50):
 
 
 @app.post("/api/gripper/close")
-async def gripper_close(speed: int = 50, force: int = 50):
+async def gripper_close(speed: int = 100, force: int = 20):
     """Close the gripper (fire-and-forget, state updates via WebSocket)."""
     try:
         client = _get_client()
@@ -382,6 +393,32 @@ async def get_config():
     return {}
 
 
+# ── Camera State ─────────────────────────────────────────────────
+
+_CAMERA_FILE = Path(__file__).parent / "camera_state.json"
+
+
+@app.get("/api/camera")
+async def get_camera():
+    """Get saved camera view."""
+    try:
+        if _CAMERA_FILE.exists():
+            return json.loads(_CAMERA_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+@app.post("/api/camera")
+async def save_camera(request: dict):
+    """Save camera view (position + target)."""
+    try:
+        _CAMERA_FILE.write_text(json.dumps(request, indent=2))
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 # ── WebSocket ───────────────────────────────────────────────────
 
 @app.websocket("/ws/state")
@@ -393,10 +430,10 @@ async def ws_state(websocket: WebSocket):
         while True:
             with _lock:
                 mode_names = {
-                    1: "INIT", 2: "BRAKE_OPEN", 3: "DISABLED",
-                    4: "ENABLE", 5: "BACKDRIVE", 6: "RUNNING",
-                    7: "RECORDING", 8: "ERROR", 9: "PAUSE",
-                    10: "JOG", 11: "TEACH",
+                    1: "INIT", 2: "BRAKE_OPEN", 3: "POWEROFF",
+                    4: "DISABLED", 5: "ENABLE", 6: "BACKDRIVE",
+                    7: "RUNNING", 8: "SINGLE_STEP", 9: "ERROR",
+                    10: "PAUSE", 11: "COLLISION",
                 }
                 data = {
                     "connected": _state["connected"],

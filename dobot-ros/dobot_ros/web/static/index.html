@@ -48,9 +48,14 @@
       <div class="card mb-2">
         <div class="card-header d-flex justify-content-between align-items-center">
           <span><i class="bi bi-badge-3d"></i> Robot View</span>
-          <button class="btn btn-outline-secondary btn-xs" id="btn-reset-camera" title="Reset camera">
-            <i class="bi bi-arrow-counterclockwise"></i> Reset
-          </button>
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary btn-xs" id="btn-save-camera" title="Save camera view">
+              <i class="bi bi-bookmark"></i> Save
+            </button>
+            <button class="btn btn-outline-secondary btn-xs" id="btn-reset-camera" title="Reset to saved view">
+              <i class="bi bi-arrow-counterclockwise"></i> Reset
+            </button>
+          </div>
         </div>
         <div class="card-body p-0">
           <div id="robot-3d-container"></div>
@@ -332,20 +337,12 @@
             </div>
           </div>
 
-          <!-- Force & Speed -->
-          <div class="row g-2">
-            <div class="col-6">
-              <label class="form-label form-label-sm mb-0">
-                Force: <span id="gripper-force-label">50</span>%
-              </label>
-              <input type="range" class="form-range form-range-sm" id="gripper-force" min="20" max="100" value="50">
-            </div>
-            <div class="col-6">
-              <label class="form-label form-label-sm mb-0">
-                Speed: <span id="gripper-speed-label">50</span>%
-              </label>
-              <input type="range" class="form-range form-range-sm" id="gripper-speed" min="1" max="100" value="50">
-            </div>
+          <!-- Force (AG-95: force also controls speed — higher force = faster) -->
+          <div>
+            <label class="form-label form-label-sm mb-0">
+              Force: <span id="gripper-force-label">20</span>%
+            </label>
+            <input type="range" class="form-range form-range-sm" id="gripper-force" min="20" max="100" value="20">
           </div>
 
           <!-- Move button -->

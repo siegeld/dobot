@@ -6,12 +6,13 @@ Owns the single Modbus connection to the gripper. Publishes state on
 /gripper/state topic, provides /gripper/init and /gripper/status services,
 and the /gripper action for move commands with feedback.
 
-Register map (DH Robotics AG-95 / PGC-50 / PGE-50):
+Register map (DH Robotics AG-95):
     Write (SetHoldRegs):
         0x0100 (256)  Init        0xA5 (165) = full init
-        0x0101 (257)  Force       20-100 %
+        0x0101 (257)  Force       20-100 % (also controls speed on AG-95)
+        0x0102 (258)  Reserved
         0x0103 (259)  Position    0 (closed) to 1000 (open)
-        0x0104 (260)  Speed       1-100 %
+        0x0104 (260)  Speed       1-100 % (PGC/PGE only — AG-95 ignores this)
 
     Read (GetHoldRegs):
         0x0200 (512)  Init status   0=not init, 1=initialized

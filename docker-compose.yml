@@ -20,6 +20,7 @@ services:
       # Mount dobot-ros code for live editing (no rebuild needed)
       - ./dobot-ros:/dobot-ros
       - ./docker/fastrtps_profile.xml:/fastrtps_profile.xml:ro
+      - dobot-shared:/tmp/dobot-shared
     stdin_open: true
     tty: true
 
@@ -31,7 +32,25 @@ services:
       - IP_address=${ROBOT_IP:-192.168.5.1}
       - DOBOT_TYPE=${ROBOT_TYPE:-cr5}
     command: >
-      bash -c "ros2 launch cr_robot_ros2 dobot_bringup_ros2.launch.py"
+      bash -c "
+        rm -f /tmp/dobot-shared/driver_restart;
+        while true; do
+          ros2 launch cr_robot_ros2 dobot_bringup_ros2.launch.py &
+          PID=$$!;
+          while kill -0 $$PID 2>/dev/null; do
+            if [ -f /tmp/dobot-shared/driver_restart ]; then
+              echo 'Restart signal received — killing driver';
+              rm -f /tmp/dobot-shared/driver_restart;
+              kill $$PID 2>/dev/null;
+              wait $$PID 2>/dev/null;
+              break;
+            fi;
+            sleep 1;
+          done;
+          echo 'Driver exited, restarting in 2s...';
+          sleep 2;
+        done
+      "
 
   # CLI service - for running dobot-ros commands
   dobot-cli:
@@ -55,3 +74,6 @@ services:
     command: dobot-ros web --port 7070
     ports:
       - "7070:7070"
+
+volumes:
+  dobot-shared:

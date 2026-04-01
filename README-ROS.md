@@ -264,7 +264,7 @@ Shell commands:
 
 ## Gripper Control (DH Robotics)
 
-Supports DH Robotics grippers (AG-95, PGE, RGD, PGC series) connected to the Dobot tool flange via RS485.
+Supports DH Robotics grippers connected to the Dobot tool flange via RS485. Currently configured for the **AG-95** adaptive gripper.
 
 ### How it Works
 
@@ -306,12 +306,15 @@ The gripper node exposes the gripper to the rest of the system via:
 | Register | Address | Read/Write | Range | Description |
 |----------|---------|------------|-------|-------------|
 | Init | 0x0100 (256) | Write | 0xA5 (165) | Full initialization |
-| Force | 0x0101 (257) | R/W | 20-100 % | Grip force |
+| Force | 0x0101 (257) | R/W | 20-100 % | Grip force (also controls speed on AG-95) |
+| Reserved | 0x0102 (258) | - | - | - |
 | Position | 0x0103 (259) | R/W | 0-1000 | 0=closed, 1000=open |
-| Speed | 0x0104 (260) | R/W | 1-100 % | Movement speed |
+| Speed | 0x0104 (260) | R/W | 1-100 % | PGC/PGE only (AG-95 ignores) |
 | Init Status | 0x0200 (512) | Read | 0/1 | 0=not init, 1=initialized |
 | Grip State | 0x0201 (513) | Read | 0-3 | 0=moving, 1=reached, 2=caught, 3=dropped |
 | Current Pos | 0x0202 (514) | Read | 0-1000 | Actual position |
+
+> **Note:** The AG-95 has no independent speed control — speed is determined by force (higher force = faster). The speed register (0x0104) is written but ignored by the AG-95. The code retains speed support for future PGC/PGE grippers.
 
 ### ROS2 Action Server
 
@@ -417,6 +420,17 @@ ping 192.168.5.1
 ---
 
 ## Troubleshooting
+
+### Joint angles not updating (stale feedback)
+
+The driver connects to the robot on two ports: 29999 (commands) and 30004 (realtime feedback). If the robot reboots while the driver is running, the feedback port can go stale — joint angles stop updating even though commands still work.
+
+The web dashboard automatically detects this (monitors message timestamps) and signals the driver to restart its ROS node. The driver's wrapper loop relaunches it within seconds, and joint data starts flowing again. No container restart needed.
+
+If you need to trigger a manual restart, create the signal file:
+```bash
+docker compose exec dobot-driver touch /tmp/dobot-shared/driver_restart
+```
 
 ### "Service not available"
 

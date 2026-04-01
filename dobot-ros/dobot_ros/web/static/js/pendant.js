@@ -258,8 +258,8 @@
 
     // Gripper
     $('#btn-tp-gripper-init').addEventListener('click', () => robotCommand('Gripper Init', 'gripper/init'));
-    $('#btn-tp-gripper-open').addEventListener('click', () => robotCommand('Gripper Open', 'gripper/open?speed=50&force=50'));
-    $('#btn-tp-gripper-close').addEventListener('click', () => robotCommand('Gripper Close', 'gripper/close?speed=50&force=50'));
+    $('#btn-tp-gripper-open').addEventListener('click', () => robotCommand('Gripper Open', 'gripper/open?speed=100&force=20'));
+    $('#btn-tp-gripper-close').addEventListener('click', () => robotCommand('Gripper Close', 'gripper/close?speed=100&force=20'));
   }
 
   if (document.readyState === 'loading') {

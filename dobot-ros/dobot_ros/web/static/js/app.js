@@ -123,10 +123,12 @@
     if (modeName) {
       modeBadge.textContent = modeName;
       const modeColors = {
-        'ENABLE': 'bg-success', 'RUNNING': 'bg-success', 'JOG': 'bg-success',
-        'DISABLED': 'bg-secondary', 'INIT': 'bg-info',
-        'ERROR': 'bg-danger', 'PAUSE': 'bg-warning',
-        'TEACH': 'bg-info', 'BACKDRIVE': 'bg-info',
+        'ENABLE': 'bg-success', 'RUNNING': 'bg-success',
+        'DISABLED': 'bg-secondary', 'POWEROFF': 'bg-secondary',
+        'INIT': 'bg-info', 'BRAKE_OPEN': 'bg-info',
+        'BACKDRIVE': 'bg-info', 'SINGLE_STEP': 'bg-info',
+        'ERROR': 'bg-danger', 'COLLISION': 'bg-danger',
+        'PAUSE': 'bg-warning',
       };
       modeBadge.className = `badge ${modeColors[modeName] || 'bg-secondary'}`;
     }
@@ -281,7 +283,7 @@
 
   function getGripperParams() {
     return {
-      speed: parseInt($('#gripper-speed').value),
+      speed: 100,  // AG-95 has no speed register; speed is controlled by force
       force: parseInt($('#gripper-force').value),
     };
   }
@@ -449,11 +451,17 @@
     $('#gripper-force').addEventListener('input', (e) => {
       $('#gripper-force-label').textContent = e.target.value;
     });
-    $('#gripper-speed').addEventListener('input', (e) => {
-      $('#gripper-speed-label').textContent = e.target.value;
-    });
 
-    // Reset 3D camera
+    // 3D camera save/reset
+    const saveBtn = $('#btn-save-camera');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', () => {
+        if (window.saveRobotCamera) {
+          window.saveRobotCamera();
+          showToast('Camera view saved', 'success');
+        }
+      });
+    }
     const resetBtn = $('#btn-reset-camera');
     if (resetBtn) {
       resetBtn.addEventListener('click', () => {

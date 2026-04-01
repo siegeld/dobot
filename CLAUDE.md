@@ -50,8 +50,10 @@ The active development focus is the ROS2 path.
 
 ## Gripper
 
-DH Robotics gripper via Modbus TCP through Dobot's internal gateway at 127.0.0.1:60000.
+DH Robotics **AG-95** adaptive gripper via Modbus TCP through Dobot's internal gateway at 127.0.0.1:60000.
 Position range: 0 (closed) to 1000 (open). Must call `gripper init` before use.
+
+**AG-95 specifics**: The AG-95 has no speed register (0x0104 is ignored). Speed is controlled by force — higher force = faster movement. The speed register code is kept for future PGC/PGE grippers which do have independent speed control. Default force is 20%.
 
 **RS-485 setup**: `SetTool485(115200)` creates the Modbus TCP gateway on port 60000. The gripper node calls this once at startup. No DHGrip plugin needed.
 
@@ -62,6 +64,32 @@ Position range: 0 (closed) to 1000 (open). Must call `gripper init` before use.
 - Multi-register reads return comma-separated values inside braces: `0,{1,1,712},GetHoldRegs(...)` — parsed with `re.search(r'\{([^}]+)\}', ...)`
 
 **Web dashboard gripper**: Commands (open/close/move) are fire-and-forget — the HTTP endpoint returns immediately after sending the ROS2 action goal. Position and state updates flow through the `/gripper/state` topic → WebSocket at 5Hz. The position slider updates live from WebSocket data.
+
+## Driver Watchdog
+
+The C++ driver connects to the robot on two ports: 29999 (commands) and 30004 (realtime feedback for joint angles, pose, mode). If the robot reboots while the driver is running, port 30004 can go stale — the driver keeps publishing the last-known joint values at 10Hz but they never update. Commands through 29999 still work.
+
+**Auto-recovery**: The web dashboard's poll thread monitors the `header.stamp` of `/joint_states_robot` messages. If the timestamp stops advancing for 5 seconds, it signals the driver to restart by touching `/tmp/dobot-shared/driver_restart` (a shared Docker volume). The driver's wrapper loop detects the signal file, kills the ROS node, and relaunches it — all without restarting the container.
+
+## Robot Modes
+
+The mode values from the feedback port (used in the web dashboard):
+
+| Value | Name | Description |
+|-------|------|-------------|
+| 1 | INIT | Initializing |
+| 2 | BRAKE_OPEN | Brakes released |
+| 3 | POWEROFF | Powered off |
+| 4 | DISABLED | Motors off |
+| 5 | ENABLE | Enabled, idle |
+| 6 | BACKDRIVE | Freedrive/teach by hand |
+| 7 | RUNNING | Executing motion |
+| 8 | SINGLE_STEP | Single step mode |
+| 9 | ERROR | Alarm (highest priority) |
+| 10 | PAUSE | Motion paused |
+| 11 | COLLISION | Collision detected |
+
+**Note**: These differ from some online Dobot docs that start at 0 or have a different ordering. The mapping above is from the official `TCP-IP-Python-V4` SDK (`dobot_api.py`).
 
 ## Gotchas
 

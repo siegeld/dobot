@@ -79,6 +79,7 @@ class DobotRosClient(Node):
         # CLI clients use service calls and don't need subscriptions.
         self._state_lock = threading.Lock()
         self._joint_angles = None  # degrees
+        self._joint_stamp = 0.0    # header.stamp from last joint msg
         self._cartesian_pose = None  # [X, Y, Z, RX, RY, RZ]
         self._robot_mode = -1
         self._gripper_state = {
@@ -129,6 +130,8 @@ class DobotRosClient(Node):
     def _joint_state_cb(self, msg: JointState):
         with self._state_lock:
             self._joint_angles = [math.degrees(r) for r in msg.position]
+            self._joint_stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            self._joint_stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
     def _tool_vector_cb(self, msg: ToolVectorActual):
         with self._state_lock:
@@ -203,6 +206,14 @@ class DobotRosClient(Node):
     def check_connection(self) -> bool:
         """Check if dobot_bringup_v4 services are available."""
         return self._wait_for_service(self._enable_client)
+
+    def is_feedback_stale(self, max_age: float = 5.0) -> bool:
+        """True if joint state timestamps have stopped advancing (feedback port dead)."""
+        with self._state_lock:
+            if self._joint_stamp == 0.0:
+                return False  # No data yet, not stale
+            now = self.get_clock().now().nanoseconds * 1e-9
+            return (now - self._joint_stamp) > max_age
 
     def get_robot_mode(self) -> int:
         """Get current robot mode (from FeedInfo topic)."""

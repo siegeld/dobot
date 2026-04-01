@@ -94,6 +94,7 @@ function init() {
   scene.add(robotRoot);
 
   loadRobot();
+  loadSavedCamera();
 
   // Resize handling
   const ro = new ResizeObserver(() => onResize(container));
@@ -180,11 +181,53 @@ function updateJoints(anglesDeg) {
   }
 }
 
-function resetCamera() {
+function getCameraState() {
+  if (!camera || !controls) return null;
+  return {
+    position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+    target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
+  };
+}
+
+function applyCameraState(state) {
+  if (!camera || !controls || !state) return;
+  camera.position.set(state.position.x, state.position.y, state.position.z);
+  controls.target.set(state.target.x, state.target.y, state.target.z);
+  controls.update();
+}
+
+async function saveCamera() {
+  const state = getCameraState();
+  if (!state) return;
+  await fetch('/api/camera', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(state),
+  });
+}
+
+async function resetCamera() {
+  try {
+    const res = await fetch('/api/camera');
+    const state = await res.json();
+    if (state && state.position) {
+      applyCameraState(state);
+      return;
+    }
+  } catch (e) { /* fall through to defaults */ }
+  // Default view
   if (!camera || !controls) return;
   camera.position.set(0.9, 0.7, 1.1);
   controls.target.set(0, 0.35, 0);
   controls.update();
+}
+
+async function loadSavedCamera() {
+  try {
+    const res = await fetch('/api/camera');
+    const state = await res.json();
+    if (state && state.position) applyCameraState(state);
+  } catch (e) { /* use defaults */ }
 }
 
 function onResize(container) {
@@ -213,3 +256,4 @@ if (document.readyState === 'loading') {
 // Expose to non-module app.js
 window.updateRobotJoints = updateJoints;
 window.resetRobotCamera = resetCamera;
+window.saveRobotCamera = saveCamera;
