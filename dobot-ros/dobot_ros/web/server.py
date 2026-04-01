@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import subprocess
 import time
 import threading
@@ -377,7 +378,7 @@ async def get_config():
     """Get current configuration."""
     if _config:
         return {
-            "robot_ip": _config.robot_ip,
+            "robot_ip": os.environ.get("IP_address", _config.robot_ip),
             "ros_namespace": _config.ros_namespace,
             "service_timeout": _config.service_timeout,
             "jog_distance": _config.jog_default_distance,

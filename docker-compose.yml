@@ -71,6 +71,8 @@ services:
   dobot-web:
     extends: dobot
     restart: unless-stopped
+    environment:
+      - IP_address=${ROBOT_IP:-192.168.5.1}
     command: dobot-ros web --port 7070
     ports:
       - "7070:7070"
