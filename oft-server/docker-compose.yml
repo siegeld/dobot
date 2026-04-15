@@ -1,0 +1,37 @@
+services:
+  oft-server:
+    build:
+      context: .
+      args:
+        OFT_MODE: ${OFT_MODE:-mock}
+    image: oft-server:${OFT_MODE:-mock}
+    container_name: oft-server
+    environment:
+      - OFT_MODE=${OFT_MODE:-mock}
+      - OFT_CHECKPOINT=${OFT_CHECKPOINT:-/data/checkpoints/latest}
+      - OFT_DEVICE=${OFT_DEVICE:-cuda:0}
+      - OFT_DTYPE=${OFT_DTYPE:-bfloat16}
+      - OFT_LOAD_IN_4BIT=${OFT_LOAD_IN_4BIT:-0}
+      - OFT_CHUNK_SIZE=${OFT_CHUNK_SIZE:-8}
+      - OFT_PORT=7071
+    ports:
+      - "7071:7071"
+    volumes:
+      - ${OFT_CHECKPOINT_DIR:-./checkpoints}:/data/checkpoints
+      - ${OFT_TRAINING_REPO:-./empty}:/opt/openvla-oft:ro
+    networks:
+      - llm-net
+    restart: unless-stopped
+    # Real mode wants the GPU; mock mode ignores it.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+networks:
+  llm-net:
+    name: llm-net
+    external: true

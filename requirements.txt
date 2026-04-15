@@ -4,3 +4,7 @@ pyyaml>=5.4.0
 numpy>=1.19.0
 requests>=2.25.0
 prompt_toolkit>=3.0.0
+# Pillow — needed by VLA recorder/client for JPEG decode and image shape inspection.
+Pillow>=10.0.0
+# python-multipart — enables FastAPI UploadFile (settings import endpoint).
+python-multipart>=0.0.9

@@ -1,0 +1,326 @@
+"""Manual streaming-servo tester for ServoP.
+
+Additive: does not touch any existing control path. MovJ/MovL/jog/pick remain
+fully functional. Use this tool to validate ServoP behavior before wiring VLA
+or other high-rate controllers to it.
+
+Design:
+- Single fixed-rate thread streams ServoP targets.
+- Target is the anchor pose (captured at start) plus a live 6-D offset.
+- Offset comes from either (a) jog sliders/keyboard, or (b) a pattern generator.
+- Every commanded pose is clamped to workspace bounds via safety.apply().
+- ServoP expects monotonic streaming — pauses halt the controller. The loop
+  therefore keeps sending the last target even when the user isn't actively
+  jogging ("hold pose" mode).
+"""
+
+from __future__ import annotations
+
+import collections
+import logging
+import threading
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Deque, List, Optional
+
+from dobot_ros.servo.patterns import Pattern
+from dobot_ros.vla.safety import SafetyLimits, apply as safety_apply
+
+
+log = logging.getLogger(__name__)
+
+
+# ── Config / status ────────────────────────────────────────────────────
+@dataclass
+class ServoConfig:
+    """Streaming + ServoP tuning parameters. All live-editable."""
+    servo_rate_hz: float = 30.0
+    t: float = 0.05
+    aheadtime: float = 50.0
+    gain: float = 500.0
+
+    # How long to keep streaming "hold" after the last target update before
+    # giving up and parking. None = forever (stay in servo mode until stop()).
+    idle_timeout_s: Optional[float] = None
+
+
+@dataclass
+class ServoStatus:
+    running: bool = False
+    anchor_pose: List[float] = field(default_factory=list)
+    last_target_offset: List[float] = field(default_factory=lambda: [0.0] * 6)
+    last_commanded_pose: List[float] = field(default_factory=list)
+    step: int = 0
+    clamps: int = 0
+    overruns: int = 0
+    last_latency_ms: float = 0.0
+    p50_latency_ms: float = 0.0
+    p95_latency_ms: float = 0.0
+    last_error: Optional[str] = None
+    mode: str = "idle"   # "idle" | "jog" | "pattern"
+    pattern_name: Optional[str] = None
+    pattern_elapsed_s: float = 0.0
+
+
+# ── Tester ─────────────────────────────────────────────────────────────
+class ServoTester:
+    def __init__(
+        self,
+        ros_client,
+        config: Optional[ServoConfig] = None,
+        limits: Optional[SafetyLimits] = None,
+        table_plane_path: Optional[str] = None,
+        log_csv_path: Optional[str] = None,
+    ):
+        self.ros = ros_client
+        self.config = config or ServoConfig()
+
+        if limits is not None:
+            self.limits = limits
+        elif table_plane_path and Path(table_plane_path).exists():
+            self.limits = SafetyLimits.from_table_plane(Path(table_plane_path))
+        else:
+            self.limits = SafetyLimits()
+
+        self.log_csv_path = log_csv_path
+
+        self._thread: Optional[threading.Thread] = None
+        self._stop = threading.Event()
+        # Reentrant: public methods that return status() may be called while
+        # we already hold the lock in internal paths.
+        self._lock = threading.RLock()
+
+        # State exposed to the outside.
+        self._anchor: List[float] = []
+        self._target_offset: List[float] = [0.0] * 6
+        self._target_last_updated: float = 0.0
+        self._pattern: Optional[Pattern] = None
+        self._pattern_start_t: float = 0.0
+
+        self._latencies: Deque[float] = collections.deque(maxlen=200)
+        self._status = ServoStatus()
+
+        self._csv_file = None
+
+    # ── Lifecycle ───────────────────────────────────────────────
+    def is_running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self) -> ServoStatus:
+        with self._lock:
+            if self.is_running():
+                return self.status()
+            self._anchor = list(self.ros.get_cartesian_pose())
+            self._target_offset = [0.0] * 6
+            self._target_last_updated = time.time()
+            self._pattern = None
+            self._stop.clear()
+            self._status = ServoStatus(running=True, anchor_pose=list(self._anchor))
+            if self.log_csv_path:
+                self._open_csv()
+            self._thread = threading.Thread(target=self._run, daemon=True)
+            self._thread.start()
+            log.info("servo tester started; anchor=%s", self._anchor)
+        return self.status()
+
+    def stop(self, timeout: float = 2.0, call_robot_stop: bool = False):
+        """Halt the stream. If `call_robot_stop`, also tell the controller to stop motion."""
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=timeout)
+        with self._lock:
+            self._status.running = False
+            self._status.mode = "idle"
+            self._pattern = None
+            self._close_csv()
+        if call_robot_stop:
+            try:
+                self.ros.stop()
+            except Exception as e:
+                log.warning("ros.stop() during servo stop failed: %s", e)
+        log.info("servo tester stopped (robot_stop=%s)", call_robot_stop)
+
+    def emergency_stop(self):
+        """STOP button handler: halt thread AND call controller Stop."""
+        self.stop(timeout=1.0, call_robot_stop=True)
+
+    # ── Live inputs ─────────────────────────────────────────────
+    def set_target_offset(self, offset: List[float]) -> ServoStatus:
+        """Jog-slider update. Clears any active pattern."""
+        if len(offset) != 6:
+            raise ValueError("target offset must be 6-D")
+        with self._lock:
+            self._target_offset = [float(v) for v in offset]
+            self._pattern = None
+            self._target_last_updated = time.time()
+            self._status.mode = "jog"
+            self._status.pattern_name = None
+        return self.status()
+
+    def set_pattern(self, pattern: Pattern, name: str) -> ServoStatus:
+        """Start driving the target from a pattern generator (overrides jog)."""
+        with self._lock:
+            self._pattern = pattern
+            self._pattern_start_t = time.time()
+            self._target_offset = [0.0] * 6
+            self._target_last_updated = time.time()
+            self._status.mode = "pattern"
+            self._status.pattern_name = name
+        return self.status()
+
+    def clear_pattern(self) -> ServoStatus:
+        with self._lock:
+            self._pattern = None
+            self._status.mode = "jog"
+            self._status.pattern_name = None
+        return self.status()
+
+    def update_config(self, **kwargs) -> ServoStatus:
+        """Update tuning parameters live. Only known fields are applied."""
+        with self._lock:
+            for k, v in kwargs.items():
+                if hasattr(self.config, k):
+                    setattr(self.config, k, v)
+        return self.status()
+
+    def status(self) -> ServoStatus:
+        with self._lock:
+            # Snapshot so the caller can't mutate internal state.
+            return ServoStatus(**self._status.__dict__)
+
+    # ── Main loop ───────────────────────────────────────────────
+    def _run(self):
+        last_overrun_report = 0.0
+        try:
+            while not self._stop.is_set():
+                tick_start = time.perf_counter()
+                period = 1.0 / max(1.0, self.config.servo_rate_hz)
+
+                # Compute the commanded pose (anchor + current offset).
+                offset = self._current_offset()
+                commanded = [self._anchor[i] + offset[i] for i in range(6)]
+
+                # Safety: clamp against workspace bounds.
+                # We DON'T clamp per-step delta here because the tester
+                # explicitly wants to test arbitrary targets; workspace bounds
+                # are the floor we won't cross.
+                from dobot_ros.vla.safety import clamp_pose
+                clamped, reasons = clamp_pose(commanded, self.limits)
+                if reasons:
+                    with self._lock:
+                        self._status.clamps += 1
+
+                # Stream the ServoP call. Time elapsed in the call is our latency.
+                call_start = time.perf_counter()
+                try:
+                    self.ros.servo_p(
+                        clamped,
+                        t=self.config.t,
+                        aheadtime=self.config.aheadtime,
+                        gain=self.config.gain,
+                    )
+                    latency_ms = (time.perf_counter() - call_start) * 1000.0
+                    with self._lock:
+                        self._latencies.append(latency_ms)
+                        self._status.last_latency_ms = latency_ms
+                        self._status.last_commanded_pose = clamped
+                        self._status.last_target_offset = list(offset)
+                        self._status.step += 1
+                        self._refresh_percentiles()
+                    self._maybe_log(clamped, offset, latency_ms)
+                except Exception as e:
+                    log.warning("servo_p call failed: %s", e)
+                    with self._lock:
+                        self._status.last_error = f"servo_p: {e}"
+                    # One failure is tolerable — bail only after several.
+                    # For now we keep going; the web UI shows the error.
+
+                # Pace the loop.
+                elapsed = time.perf_counter() - tick_start
+                sleep = period - elapsed
+                if sleep > 0:
+                    self._stop.wait(timeout=sleep)
+                else:
+                    with self._lock:
+                        self._status.overruns += 1
+                    now = time.time()
+                    if now - last_overrun_report > 1.0:
+                        log.debug("servo tester overrun: %.1f ms over budget", -sleep * 1000)
+                        last_overrun_report = now
+
+                # Idle timeout — auto-stop if no one has touched the target in a while.
+                if self.config.idle_timeout_s is not None:
+                    if time.time() - self._target_last_updated > self.config.idle_timeout_s:
+                        log.info("servo tester idle timeout — halting")
+                        break
+
+        except Exception as e:
+            log.exception("servo tester crashed: %s", e)
+            with self._lock:
+                self._status.last_error = str(e)
+        finally:
+            with self._lock:
+                self._status.running = False
+                self._close_csv()
+
+    def _current_offset(self) -> List[float]:
+        """Return the 6-D offset for this tick, evaluating a pattern if active."""
+        with self._lock:
+            if self._pattern is not None:
+                elapsed = time.time() - self._pattern_start_t
+                self._status.pattern_elapsed_s = elapsed
+                if self._pattern.finished(elapsed):
+                    # Pattern ended — drop to hold mode.
+                    self._pattern = None
+                    self._status.mode = "idle"
+                    self._status.pattern_name = None
+                    return list(self._target_offset)
+                return list(self._pattern.target_at(elapsed))
+            return list(self._target_offset)
+
+    def _refresh_percentiles(self):
+        if not self._latencies:
+            return
+        sorted_l = sorted(self._latencies)
+        n = len(sorted_l)
+        self._status.p50_latency_ms = sorted_l[n // 2]
+        self._status.p95_latency_ms = sorted_l[min(n - 1, int(n * 0.95))]
+
+    # ── CSV logging ─────────────────────────────────────────────
+    def _open_csv(self):
+        try:
+            path = Path(self.log_csv_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._csv_file = path.open("w", buffering=1)  # line-buffered
+            self._csv_file.write(
+                "t,ox,oy,oz,orx,ory,orz,"
+                "cx,cy,cz,crx,cry,crz,"
+                "ax,ay,az,arx,ary,arz,latency_ms\n"
+            )
+        except Exception as e:
+            log.warning("open csv log failed: %s", e)
+            self._csv_file = None
+
+    def _close_csv(self):
+        if self._csv_file is not None:
+            try:
+                self._csv_file.close()
+            except Exception:
+                pass
+            self._csv_file = None
+
+    def _maybe_log(self, commanded: List[float], offset: List[float], latency_ms: float):
+        if self._csv_file is None:
+            return
+        try:
+            actual = self.ros.get_cartesian_pose()
+        except Exception:
+            actual = [0.0] * 6
+        row = (
+            [time.time()] + offset + commanded + list(actual) + [latency_ms]
+        )
+        try:
+            self._csv_file.write(",".join(f"{v:.4f}" for v in row) + "\n")
+        except Exception:
+            pass

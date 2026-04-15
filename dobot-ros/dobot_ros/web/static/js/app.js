@@ -930,7 +930,601 @@
     // Poll status every 5s for uptime etc
     setInterval(pollStatus, 5000);
 
+    initVLA();
+    initServoTester();
+    initSettings();
+    initPendantModal();
+    initHashNav();
+
+    // Global E-STOP in the navbar — halts any active servo streaming and
+    // calls ros.stop() regardless of current tab. Safe to click anytime.
+    const gEstop = document.getElementById('btn-global-estop');
+    if (gEstop) {
+      gEstop.addEventListener('click', async () => {
+        // Halt any active servo streaming first; then issue a regular ros.stop().
+        try { await fetch('/api/servo/estop', { method: 'POST' }); } catch (e) {}
+        try { await fetch('/api/stop', { method: 'POST' }); } catch (e) {}
+        logActivity('E-STOP engaged (servo halted, ros.stop() called)', 'warn');
+      });
+    }
+
     logActivity('Dashboard initialized', 'info');
+  }
+
+  // ── VLA (Vision-Language-Action) ───────────────────────────────
+
+  async function vlaRefreshStatus() {
+    try {
+      const r = await fetch('/api/vla/status');
+      const s = await r.json();
+      const urlEl = document.getElementById('vla-server-url');
+      const statEl = document.getElementById('vla-server-status');
+      const modelEl = document.getElementById('vla-server-model');
+      if (urlEl) urlEl.textContent = s.server_url || '--';
+      if (statEl) {
+        const server = s.server || {};
+        const ok = server.status === 'ok';
+        statEl.innerHTML = ok
+          ? `<span class="text-success">OK</span> (${server.mode || '?'})`
+          : `<span class="text-danger">${server.status || 'unknown'}</span>`;
+      }
+      if (modelEl) modelEl.textContent = (s.server && s.server.model) || '--';
+
+      const recStatus = document.getElementById('vla-record-status');
+      if (recStatus) {
+        recStatus.textContent = s.recording ? 'Recording…' : 'Not recording';
+      }
+      document.getElementById('btn-vla-record-start').disabled = !!s.recording;
+      document.getElementById('btn-vla-record-stop').disabled = !s.recording;
+
+      const execStatus = document.getElementById('vla-execute-status');
+      if (execStatus) {
+        if (s.executing && s.executor) {
+          const e = s.executor;
+          execStatus.innerHTML =
+            `Running • step ${e.step} • ${e.last_latency_ms.toFixed(1)} ms ` +
+            `• clamps ${e.clamps}` +
+            (e.last_error ? ` • <span class="text-danger">${e.last_error}</span>` : '');
+        } else {
+          execStatus.textContent = 'Idle';
+        }
+      }
+      document.getElementById('btn-vla-execute-start').disabled = !!s.executing;
+      document.getElementById('btn-vla-execute-stop').disabled = !s.executing;
+    } catch (e) {
+      // Non-fatal — modal may be closed.
+    }
+  }
+
+  async function vlaRefreshEpisodes() {
+    const r = await fetch('/api/vla/episodes');
+    const { episodes } = await r.json();
+    const el = document.getElementById('vla-episodes-list');
+    if (!el) return;
+    if (!episodes || !episodes.length) {
+      el.innerHTML = '<em class="text-muted">No episodes yet.</em>';
+      return;
+    }
+    const rows = episodes.map(e => {
+      const dur = (e.started_at && e.ended_at)
+        ? `${(e.ended_at - e.started_at).toFixed(1)}s` : '—';
+      return `<tr>
+        <td><code>${e.name}</code></td>
+        <td class="text-muted">${e.instruction || ''}</td>
+        <td class="text-end">${e.num_steps || 0}</td>
+        <td class="text-end">${dur}</td>
+      </tr>`;
+    }).join('');
+    el.innerHTML = `<table class="table table-sm table-borderless mb-0">
+      <thead class="small text-muted">
+        <tr><th>Name</th><th>Instruction</th><th class="text-end">Steps</th><th class="text-end">Dur</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  async function vlaPost(path, body) {
+    const r = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : '{}',
+    });
+    return r.json();
+  }
+
+  function initVLA() {
+    // Tab trigger button fires Bootstrap tab events; fall back to the legacy
+    // modal element if the old markup is still in place.
+    const trigger = document.getElementById('tab-vla-btn') || document.getElementById('vlaModal');
+    if (!trigger) return;
+
+    const showEvt = trigger.id === 'vlaModal' ? 'shown.bs.modal' : 'shown.bs.tab';
+    const hideEvt = trigger.id === 'vlaModal' ? 'hidden.bs.modal' : 'hidden.bs.tab';
+
+    let poll = null;
+    trigger.addEventListener(showEvt, () => {
+      vlaRefreshStatus();
+      vlaRefreshEpisodes();
+      if (poll) clearInterval(poll);
+      poll = setInterval(vlaRefreshStatus, 1000);
+    });
+    trigger.addEventListener(hideEvt, () => {
+      if (poll) { clearInterval(poll); poll = null; }
+    });
+
+    const byId = id => document.getElementById(id);
+    byId('btn-vla-refresh-episodes')?.addEventListener('click', vlaRefreshEpisodes);
+
+    byId('btn-vla-record-start')?.addEventListener('click', async () => {
+      const instr = byId('vla-record-instruction').value.trim();
+      if (!instr) { logActivity('VLA: instruction required', 'warn'); return; }
+      const res = await vlaPost('/api/vla/record/start', { instruction: instr });
+      if (res.success) logActivity(`VLA: recording → ${res.episode_dir}`, 'info');
+      else logActivity(`VLA: record start failed — ${res.error}`, 'error');
+      vlaRefreshStatus();
+    });
+    byId('btn-vla-record-stop')?.addEventListener('click', async () => {
+      const res = await vlaPost('/api/vla/record/stop');
+      if (res.success) logActivity(`VLA: sealed ${res.episode_dir || '(none)'}`, 'info');
+      else logActivity(`VLA: stop failed — ${res.error}`, 'error');
+      vlaRefreshStatus();
+      vlaRefreshEpisodes();
+    });
+
+    byId('btn-vla-execute-start')?.addEventListener('click', async () => {
+      const instr = byId('vla-execute-instruction').value.trim();
+      if (!instr) { logActivity('VLA: instruction required', 'warn'); return; }
+      const res = await vlaPost('/api/vla/execute/start', { instruction: instr });
+      if (res.success) logActivity(`VLA: executing ${instr}`, 'info');
+      else logActivity(`VLA: execute start failed — ${res.error}`, 'error');
+      vlaRefreshStatus();
+    });
+    byId('btn-vla-execute-stop')?.addEventListener('click', async () => {
+      const res = await vlaPost('/api/vla/execute/stop');
+      logActivity(`VLA: stopped executor`, res.success ? 'info' : 'error');
+      vlaRefreshStatus();
+    });
+  }
+
+  // ── Servo Tester ───────────────────────────────────────────────
+
+  async function servoPost(path, body) {
+    const r = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    return r.json();
+  }
+
+  function fmtVec(v, digits = 1) {
+    if (!v || !v.length) return '--';
+    return '[' + v.map(x => Number(x).toFixed(digits)).join(', ') + ']';
+  }
+
+  async function servoRefreshStatus() {
+    try {
+      const r = await fetch('/api/servo/status');
+      const s = await r.json();
+      document.getElementById('srv-mode').textContent = s.mode || '--';
+      document.getElementById('srv-step').textContent = s.step || 0;
+      document.getElementById('srv-lat').textContent = (s.last_latency_ms ?? 0).toFixed(1);
+      document.getElementById('srv-pct').textContent =
+        `${(s.p50_latency_ms ?? 0).toFixed(1)}/${(s.p95_latency_ms ?? 0).toFixed(1)}`;
+      document.getElementById('srv-clamps').textContent = s.clamps || 0;
+      document.getElementById('srv-overruns').textContent = s.overruns || 0;
+      document.getElementById('srv-anchor').textContent = fmtVec(s.anchor_pose);
+      document.getElementById('srv-commanded').textContent = fmtVec(s.last_commanded_pose);
+      document.getElementById('srv-error').textContent = s.last_error || '';
+
+      document.getElementById('btn-srv-start').disabled = !!s.running;
+      document.getElementById('btn-srv-stop').disabled = !s.running;
+    } catch (e) {
+      // Modal may be closed.
+    }
+  }
+
+  // Throttled offset pusher: coalesce rapid slider events into 10 Hz updates.
+  const servoOffsetState = {
+    offset: [0, 0, 0, 0, 0, 0],
+    dirty: false,
+    lastSent: 0,
+  };
+  async function servoMaybePushOffset() {
+    if (!servoOffsetState.dirty) return;
+    const now = performance.now();
+    if (now - servoOffsetState.lastSent < 80) return;  // ~12.5 Hz ceiling
+    servoOffsetState.lastSent = now;
+    servoOffsetState.dirty = false;
+    try {
+      await servoPost('/api/servo/target', { offset: servoOffsetState.offset });
+    } catch (e) { /* ignore */ }
+  }
+
+  function initServoTester() {
+    const modal = document.getElementById('servoModal') || document.getElementById('tab-servo');
+    if (!modal) return;
+
+    const byId = id => document.getElementById(id);
+
+    // Tuning sliders — live-update their value display and push config.
+    const tunePush = debounce(async () => {
+      const cfg = {
+        servo_rate_hz: parseFloat(byId('srv-rate').value),
+        t: parseFloat(byId('srv-t').value),
+        gain: parseFloat(byId('srv-gain').value),
+        aheadtime: parseFloat(byId('srv-ahead').value),
+      };
+      try { await servoPost('/api/servo/config', cfg); } catch (e) {}
+    }, 150);
+
+    const tuneMap = [
+      ['srv-rate', 'srv-rate-val', v => v],
+      ['srv-t', 'srv-t-val', v => v],
+      ['srv-gain', 'srv-gain-val', v => v],
+      ['srv-ahead', 'srv-ahead-val', v => v],
+    ];
+    for (const [sliderId, valId, fmt] of tuneMap) {
+      const el = byId(sliderId);
+      if (!el) continue;
+      el.addEventListener('input', () => {
+        byId(valId).textContent = fmt(el.value);
+        tunePush();
+      });
+    }
+
+    // Jog sliders — push offset target.
+    const jogLabels = ['srv-jog-x-val', 'srv-jog-y-val', 'srv-jog-z-val',
+                       'srv-jog-rx-val', 'srv-jog-ry-val', 'srv-jog-rz-val'];
+    const jogOffsetPusher = setInterval(servoMaybePushOffset, 50);
+    document.querySelectorAll('.srv-jog').forEach(s => {
+      s.addEventListener('input', () => {
+        const axis = parseInt(s.dataset.axis, 10);
+        const v = parseFloat(s.value);
+        servoOffsetState.offset[axis] = v;
+        servoOffsetState.dirty = true;
+        byId(jogLabels[axis]).textContent = v;
+      });
+      // Spring-back to 0 on release for translational axes.
+      s.addEventListener('change', () => {
+        const axis = parseInt(s.dataset.axis, 10);
+        if (axis < 3) {
+          s.value = 0;
+          servoOffsetState.offset[axis] = 0;
+          servoOffsetState.dirty = true;
+          byId(jogLabels[axis]).textContent = 0;
+        }
+      });
+    });
+
+    byId('btn-srv-center')?.addEventListener('click', () => {
+      document.querySelectorAll('.srv-jog').forEach(s => { s.value = 0; });
+      servoOffsetState.offset = [0, 0, 0, 0, 0, 0];
+      servoOffsetState.dirty = true;
+      for (let i = 0; i < 6; i++) byId(jogLabels[i]).textContent = 0;
+    });
+
+    // Patterns.
+    document.querySelectorAll('[data-pattern]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const name = btn.dataset.pattern;
+        const params = {
+          circle:    { radius_mm: 40, period_s: 4, plane: 'xy' },
+          lissajous: { amplitude_x_mm: 40, amplitude_y_mm: 40,
+                       freq_x_hz: 0.25, freq_y_hz: 0.33, phase_deg: 90 },
+          square:    { axis: 'x', amplitude: 30, period_s: 4 },
+          sine:      { axis: 'x', amplitude: 30, freq_hz: 0.5 },
+        }[name] || {};
+        const res = await servoPost('/api/servo/pattern', { name, params });
+        logActivity(`Servo: pattern ${name} ${res.success ? 'running' : 'failed'}`,
+                    res.success ? 'info' : 'error');
+      });
+    });
+    byId('btn-srv-clear-pattern')?.addEventListener('click', async () => {
+      await servoPost('/api/servo/target', { offset: servoOffsetState.offset });
+    });
+
+    // Start / Stop / E-Stop.
+    byId('btn-srv-start')?.addEventListener('click', async () => {
+      const res = await servoPost('/api/servo/start', {
+        servo_rate_hz: parseFloat(byId('srv-rate').value),
+        t: parseFloat(byId('srv-t').value),
+        gain: parseFloat(byId('srv-gain').value),
+        aheadtime: parseFloat(byId('srv-ahead').value),
+        csv_log: byId('srv-csv').checked,
+      });
+      logActivity(res.success ? 'Servo tester started' : `Servo start failed: ${res.error}`,
+                  res.success ? 'info' : 'error');
+      servoRefreshStatus();
+    });
+    byId('btn-srv-stop')?.addEventListener('click', async () => {
+      await servoPost('/api/servo/stop');
+      logActivity('Servo tester stopped', 'info');
+      servoRefreshStatus();
+    });
+    byId('btn-srv-estop')?.addEventListener('click', async () => {
+      await servoPost('/api/servo/estop');
+      logActivity('Servo E-STOP engaged', 'warn');
+      servoRefreshStatus();
+    });
+
+    // Poll status while the Servo tab (or legacy modal) is visible.
+    const trigger = document.getElementById('tab-servo-btn') || modal;
+    const showEvt = trigger.id === 'servoModal' ? 'shown.bs.modal' : 'shown.bs.tab';
+    const hideEvt = trigger.id === 'servoModal' ? 'hidden.bs.modal' : 'hidden.bs.tab';
+    let poll = null;
+    trigger.addEventListener(showEvt, () => {
+      servoRefreshStatus();
+      if (poll) clearInterval(poll);
+      poll = setInterval(servoRefreshStatus, 500);
+    });
+    trigger.addEventListener(hideEvt, () => {
+      if (poll) { clearInterval(poll); poll = null; }
+    });
+  }
+
+  function debounce(fn, ms) {
+    let h;
+    return (...args) => {
+      clearTimeout(h);
+      h = setTimeout(() => fn.apply(null, args), ms);
+    };
+  }
+
+  // ── Pendant modal ─────────────────────────────────────────────
+  // Lazy-loads the /pendant page into an iframe on first open so the main
+  // dashboard doesn't pay the pendant's startup cost up front. Unloads the
+  // iframe on close so any polling/timers stop when the modal is hidden.
+
+  function initPendantModal() {
+    const modal = document.getElementById('pendantModal');
+    const frame = document.getElementById('pendantFrame');
+    if (!modal || !frame) return;
+
+    modal.addEventListener('show.bs.modal', () => {
+      // Append a cache-buster so edits to pendant.html show up without a
+      // manual hard-reload.
+      frame.src = '/pendant?t=' + Date.now();
+    });
+    modal.addEventListener('hidden.bs.modal', () => {
+      // Drop the iframe source so any intervals / WebSockets inside the
+      // pendant page are torn down.
+      frame.src = 'about:blank';
+    });
+  }
+
+  // ── Hash-based tab navigation ─────────────────────────────────
+  // URL fragments persist the active tab across refreshes and support
+  // browser back/forward. Short hash forms map to existing tab button IDs.
+
+  const HASH_TO_TAB = {
+    'dashboard':   'tab-dashboard-btn',
+    'calibration': 'tab-calibration-btn',
+    'vla':         'tab-vla-btn',
+    'servo':       'tab-servo-btn',
+    'settings':    'tab-settings-btn',
+  };
+  const TAB_TO_HASH = Object.fromEntries(
+    Object.entries(HASH_TO_TAB).map(([h, id]) => [id, h])
+  );
+
+  function hashToTabId(hash) {
+    const key = (hash || '').replace(/^#/, '').toLowerCase();
+    return HASH_TO_TAB[key] || null;
+  }
+
+  function activateTabFromHash() {
+    const btnId = hashToTabId(window.location.hash);
+    if (!btnId) return;
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    // Only show if not already active — avoids unnecessary shown/hidden events.
+    if (!btn.classList.contains('active')) {
+      // eslint-disable-next-line no-undef
+      bootstrap.Tab.getOrCreateInstance(btn).show();
+    }
+  }
+
+  function initHashNav() {
+    // Update hash when a tab is shown.
+    document.querySelectorAll('[data-bs-toggle="tab"]').forEach(btn => {
+      btn.addEventListener('shown.bs.tab', (ev) => {
+        const hash = TAB_TO_HASH[ev.target.id];
+        if (!hash) return;
+        const desired = '#' + hash;
+        if (window.location.hash !== desired) {
+          // Use replaceState so tab switches don't bloat browser history.
+          history.replaceState(null, '', window.location.pathname + desired);
+        }
+      });
+    });
+
+    // Respond to browser navigation and external hash changes.
+    window.addEventListener('hashchange', activateTabFromHash);
+
+    // Activate the tab named in the URL on initial load (deferred until the
+    // DOM is in place and Bootstrap is available).
+    activateTabFromHash();
+  }
+
+  // ── Settings tab ───────────────────────────────────────────────
+
+  async function settingsRefreshList() {
+    const el = document.getElementById('settings-saved-list');
+    if (!el) return;
+    try {
+      const r = await fetch('/api/settings/saved');
+      const { saved } = await r.json();
+      if (!saved || !saved.length) {
+        el.innerHTML = '<em class="text-muted">No saved settings yet.</em>';
+        return;
+      }
+      const rows = saved.map(s => {
+        const upd = s.updated_at ? s.updated_at.replace('T', ' ').replace('Z', '') : '';
+        const desc = (s.description || '').replace(/</g, '&lt;');
+        return `<tr data-name="${s.name}">
+          <td><code>${s.name}</code></td>
+          <td class="text-muted small">${desc}</td>
+          <td class="text-muted small">${upd}</td>
+          <td class="text-end">
+            <div class="btn-group btn-group-sm">
+              <button class="btn btn-outline-success btn-xs" data-act="load">Load</button>
+              <button class="btn btn-outline-info btn-xs" data-act="rename">Rename</button>
+              <button class="btn btn-outline-info btn-xs" data-act="desc">Edit desc</button>
+              <a class="btn btn-outline-secondary btn-xs" href="/api/settings/saved/${encodeURIComponent(s.name)}/download" download="${s.name}.json">Download</a>
+              <button class="btn btn-outline-danger btn-xs" data-act="delete">Delete</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('');
+      el.innerHTML = `<table class="table table-sm table-borderless mb-0">
+        <thead class="text-muted small">
+          <tr><th>Name</th><th>Description</th><th>Updated</th><th class="text-end">Actions</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    } catch (e) {
+      el.innerHTML = `<span class="text-danger">Failed to load: ${e}</span>`;
+    }
+  }
+
+  async function settingsRefreshCurrent() {
+    const el = document.getElementById('settings-current-preview');
+    if (!el) return;
+    try {
+      const r = await fetch('/api/settings/current');
+      const { settings } = await r.json();
+      el.textContent = JSON.stringify(settings, null, 2);
+    } catch (e) {
+      el.textContent = `// failed to load: ${e}`;
+    }
+  }
+
+  async function settingsSaveCurrent() {
+    const name = document.getElementById('settings-save-name').value.trim();
+    const desc = document.getElementById('settings-save-desc').value.trim();
+    if (!name) { showToast('Name is required', 'warning'); return; }
+    const r = await fetch('/api/settings/saved', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description: desc }),
+    });
+    const res = await r.json();
+    if (res.success) {
+      logActivity(`Settings saved: ${name}`, 'success');
+      showToast('Settings saved', 'success');
+      document.getElementById('settings-save-name').value = '';
+      document.getElementById('settings-save-desc').value = '';
+      settingsRefreshList();
+    } else {
+      showToast(`Save failed: ${res.error || r.status}`, 'danger');
+    }
+  }
+
+  async function settingsLoadByName(name) {
+    if (!confirm(`Load "${name}" into current settings? This will replace all current settings.`)) return;
+    const r = await fetch(`/api/settings/saved/${encodeURIComponent(name)}/load`, { method: 'POST' });
+    const res = await r.json();
+    if (r.status === 409 && res.reasons) {
+      const msg = 'Blocked by safety check:\n\n' + res.reasons.map(x => ' • ' + x).join('\n');
+      alert(msg);
+      logActivity(`Load blocked: ${res.reasons.join('; ')}`, 'warn');
+      return;
+    }
+    if (res.success) {
+      logActivity(`Loaded settings: ${name}`, 'success');
+      showToast('Settings loaded', 'success');
+      settingsRefreshCurrent();
+    } else {
+      showToast(`Load failed: ${res.error || r.status}`, 'danger');
+    }
+  }
+
+  async function settingsRenameByName(name) {
+    const newName = prompt(`Rename "${name}" to:`, name);
+    if (newName == null || newName === name || !newName.trim()) return;
+    const r = await fetch(`/api/settings/saved/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_name: newName.trim() }),
+    });
+    if (r.ok) { settingsRefreshList(); logActivity(`Renamed: ${name} → ${newName}`, 'info'); }
+    else { const res = await r.json().catch(() => ({})); showToast(`Rename failed: ${res.detail || r.status}`, 'danger'); }
+  }
+
+  async function settingsEditDescByName(name) {
+    const cur = await fetch(`/api/settings/saved/${encodeURIComponent(name)}`).then(r => r.json()).catch(() => ({}));
+    const desc = prompt(`Description for "${name}":`, cur.description || '');
+    if (desc == null) return;
+    const r = await fetch(`/api/settings/saved/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: desc }),
+    });
+    if (r.ok) { settingsRefreshList(); }
+    else { showToast(`Update failed: ${r.status}`, 'danger'); }
+  }
+
+  async function settingsDeleteByName(name) {
+    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    const r = await fetch(`/api/settings/saved/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (r.ok) { settingsRefreshList(); logActivity(`Deleted: ${name}`, 'info'); }
+    else { showToast(`Delete failed: ${r.status}`, 'danger'); }
+  }
+
+  async function settingsImport() {
+    const input = document.getElementById('settings-import-file');
+    const f = input?.files?.[0];
+    if (!f) { showToast('Choose a JSON file first', 'warning'); return; }
+    let bundle;
+    try {
+      const text = await f.text();
+      bundle = JSON.parse(text);
+    } catch (e) {
+      showToast(`Invalid JSON: ${e}`, 'danger'); return;
+    }
+    const r = await fetch('/api/settings/saved/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bundle),
+    });
+    const res = await r.json();
+    if (res.success) {
+      logActivity(`Imported: ${res.saved?.name || f.name}`, 'success');
+      showToast('Import complete', 'success');
+      input.value = '';
+      settingsRefreshList();
+    } else {
+      showToast(`Import failed: ${res.error || r.status}`, 'danger');
+    }
+  }
+
+  function initSettings() {
+    const trigger = document.getElementById('tab-settings-btn');
+    if (!trigger) return;
+    trigger.addEventListener('shown.bs.tab', () => {
+      settingsRefreshList();
+      settingsRefreshCurrent();
+    });
+
+    document.getElementById('btn-settings-save')?.addEventListener('click', settingsSaveCurrent);
+    document.getElementById('btn-settings-refresh')?.addEventListener('click', settingsRefreshList);
+    document.getElementById('btn-settings-refresh-current')?.addEventListener('click', settingsRefreshCurrent);
+    document.getElementById('btn-settings-import')?.addEventListener('click', settingsImport);
+
+    // Event-delegation on the saved list for action buttons.
+    document.getElementById('settings-saved-list')?.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('button[data-act]');
+      if (!btn) return;
+      const tr = btn.closest('tr[data-name]');
+      const name = tr?.dataset?.name;
+      if (!name) return;
+      const act = btn.dataset.act;
+      if (act === 'load') await settingsLoadByName(name);
+      else if (act === 'rename') await settingsRenameByName(name);
+      else if (act === 'desc') await settingsEditDescByName(name);
+      else if (act === 'delete') await settingsDeleteByName(name);
+    });
   }
 
   // Boot

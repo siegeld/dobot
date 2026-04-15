@@ -819,6 +819,201 @@ def calibrate_test(ctx: click.Context, px: int, py: int, camera_url: str) -> Non
         print_error(f"Calibration accuracy: {error:.1f}mm — poor, recalibrate")
 
 
+# --- VLA Commands ---
+
+
+@cli.group()
+def vla():
+    """Vision-Language-Action: record demos, run closed-loop inference.
+
+    See VLA.md at the repo root for design and workflow.
+    """
+    pass
+
+
+@vla.command("record")
+@click.argument("instruction")
+@click.option("--name", default=None, help="Episode name (defaults to slug of instruction)")
+@click.option("--rate", default=10.0, type=float, help="Capture rate in Hz (default 10)")
+@click.option("--episodes-dir", default="/data/episodes", help="Where to write episode dirs")
+@click.option("--camera-url", default="http://10.11.6.65:8080", help="Camera server URL")
+@click.pass_context
+def vla_record(
+    ctx: click.Context,
+    instruction: str,
+    name: Optional[str],
+    rate: float,
+    episodes_dir: str,
+    camera_url: str,
+) -> None:
+    """Record a demonstration episode. Press Ctrl-C to stop.
+
+    Enters drag mode automatically and captures synchronized (frame, state)
+    tuples at `rate` Hz until interrupted.
+    """
+    from dobot_ros.vla.recorder import EpisodeRecorder, CameraFrameSource
+
+    config: Config = ctx.obj["config"]
+    client = _create_client(config)
+
+    camera = CameraFrameSource(camera_url=camera_url)
+    recorder = EpisodeRecorder(
+        ros_client=client, camera=camera,
+        episodes_dir=episodes_dir, rate_hz=rate,
+    )
+
+    try:
+        print_info(f"Entering drag mode...")
+        client.start_drag()
+        print_info(f"Recording: {instruction!r} @ {rate} Hz → {episodes_dir}")
+        ep_dir = recorder.start(instruction, episode_name=name)
+        print_info(f"Episode: {ep_dir}")
+        print_info("Move the robot to demonstrate. Press Ctrl-C to stop.")
+        try:
+            while recorder.is_recording():
+                import time
+                time.sleep(0.2)
+        except KeyboardInterrupt:
+            print_info("Stopping recorder...")
+        sealed = recorder.stop()
+        if sealed:
+            print_success(f"Saved: {sealed}")
+    finally:
+        try:
+            client.stop_drag()
+        except Exception:
+            pass
+        client.shutdown()
+
+
+@vla.command("list")
+@click.option("--episodes-dir", default="/data/episodes")
+def vla_list(episodes_dir: str) -> None:
+    """List recorded episodes."""
+    from dobot_ros.vla.recorder import list_episodes
+
+    episodes = list_episodes(episodes_dir)
+    if not episodes:
+        print_info(f"No episodes found in {episodes_dir}")
+        return
+
+    table = Table(title=f"Episodes in {episodes_dir}", box=box.ROUNDED)
+    table.add_column("Name", style="cyan")
+    table.add_column("Instruction", style="white")
+    table.add_column("Steps", style="yellow", justify="right")
+    table.add_column("Duration", style="green", justify="right")
+
+    for ep in episodes:
+        duration = "?"
+        if ep.get("started_at") and ep.get("ended_at"):
+            dur = ep["ended_at"] - ep["started_at"]
+            duration = f"{dur:.1f}s"
+        table.add_row(
+            ep["name"],
+            ep.get("instruction", ""),
+            str(ep.get("num_steps", 0)),
+            duration,
+        )
+    console.print(table)
+
+
+@vla.command("convert-rlds")
+@click.option("--episodes-dir", default="/data/episodes")
+@click.option("--name", default="dobot_cr5_episodes", help="TFDS dataset name")
+@click.option("--image-height", default=360, type=int)
+@click.option("--image-width", default=640, type=int)
+@click.option("--instruction", default=None, help="Override episode instructions with a fixed string")
+def vla_convert_rlds(
+    episodes_dir: str, name: str, image_height: int, image_width: int,
+    instruction: Optional[str],
+) -> None:
+    """Convert recorded episodes into a TFDS RLDS dataset."""
+    from dobot_ros.vla.rlds_builder import convert
+
+    print_info(f"Converting {episodes_dir} → RLDS TFDS dataset {name!r}")
+    out = convert(
+        episodes_dir=episodes_dir,
+        dataset_name=name,
+        image_shape=(image_height, image_width, 3),
+        instruction_override=instruction,
+    )
+    print_success(f"Dataset written: {out}")
+
+
+@vla.command("health")
+@click.option("--server-url", default="http://gpurbr2:7071")
+def vla_health(server_url: str) -> None:
+    """Check the OFT inference server."""
+    from dobot_ros.vla.client import OFTClient
+    try:
+        health = OFTClient(base_url=server_url).health()
+        console.print(health)
+    except Exception as e:
+        print_error(f"OFT server unreachable at {server_url}: {e}")
+        sys.exit(1)
+
+
+@vla.command("execute")
+@click.argument("instruction")
+@click.option("--server-url", default="http://gpurbr2:7071")
+@click.option("--servo-rate", default=30.0, type=float, help="ServoP streaming rate (Hz)")
+@click.option("--model-rate", default=10.0, type=float, help="Model action chunk rate (Hz)")
+@click.option("--chunk-n", default=4, type=int, help="Actions per chunk to execute before re-querying")
+@click.option("--table-plane", default="dobot-ros/dobot_ros/web/table_plane.json")
+@click.option("--unnorm-key", default=None)
+@click.pass_context
+def vla_execute(
+    ctx: click.Context,
+    instruction: str,
+    server_url: str,
+    servo_rate: float,
+    model_rate: float,
+    chunk_n: int,
+    table_plane: str,
+    unnorm_key: Optional[str],
+) -> None:
+    """Run closed-loop VLA execution. Press Ctrl-C to stop."""
+    from dobot_ros.vla.executor import VLAExecutor, ExecutorConfig
+
+    config: Config = ctx.obj["config"]
+    client = _create_client(config)
+
+    from pathlib import Path as _Path
+    tp_path = str(_Path(table_plane)) if _Path(table_plane).exists() else None
+
+    exec_cfg = ExecutorConfig(
+        instruction=instruction,
+        server_url=server_url,
+        servo_rate_hz=servo_rate,
+        model_rate_hz=model_rate,
+        chunk_actions_to_execute=chunk_n,
+        table_plane_path=tp_path,
+        unnorm_key=unnorm_key,
+    )
+    executor = VLAExecutor(ros_client=client, config=exec_cfg)
+
+    try:
+        executor.start()
+        print_info(f"Executing: {instruction!r} via {server_url}")
+        print_info("Press Ctrl-C to stop.")
+        import time
+        while executor.is_running():
+            time.sleep(0.5)
+            st = executor.status()
+            console.print(
+                f"  step={st.step} model_ms={st.last_latency_ms:.1f} "
+                f"chunk={st.last_chunk_size} clamps={st.clamps} "
+                f"err={st.last_error or '-'}",
+                end="\r",
+            )
+    except KeyboardInterrupt:
+        print_info("Stopping executor...")
+    finally:
+        executor.stop()
+        console.print("")
+        client.shutdown()
+
+
 @cli.command()
 @click.option("--host", default="0.0.0.0", help="Host to bind to")
 @click.option("--port", "-p", default=8080, type=int, help="Port to serve on")

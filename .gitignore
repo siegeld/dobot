@@ -60,3 +60,16 @@ dobot_config.local.yaml
 # Logs
 *.log
 environment.yaml
+
+# Runtime settings store (auto-persisted). Named user saves under saved/ are
+# intentionally user-local — commit deliberately if you want to share tunings.
+dobot-ros/dobot_ros/web/settings/last_settings.json
+dobot-ros/dobot_ros/web/settings/saved/
+dobot-ros/dobot_ros/web/settings/table_plane_for_tester.json
+
+# VLA runtime output (episodes, servo-logs) — large, per-run data.
+/data/episodes/
+/data/servo-logs/
+
+# pytest cache
+.pytest_cache/

@@ -32,7 +32,7 @@ RUN . /opt/ros/jazzy/setup.sh && \
 # At runtime, PYTHONPATH is set so the volume-mounted source takes
 # precedence — code changes work without rebuild.
 COPY dobot-ros /dobot-ros-pkg
-RUN pip3 install --break-system-packages /dobot-ros-pkg requests
+RUN pip3 install --break-system-packages /dobot-ros-pkg requests Pillow python-multipart
 
 # Source workspace on shell entry
 RUN echo "source /ros2_ws/install/setup.bash" >> /root/.bashrc

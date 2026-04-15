@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.5
+pillow>=10.0
+numpy>=1.26
+# Real-mode deps are installed conditionally in the Dockerfile when OFT_MODE=real
+# (torch, transformers, accelerate, bitsandbytes, timm, prismatic/openvla-oft).

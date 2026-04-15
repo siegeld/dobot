@@ -25,32 +25,15 @@ services:
     tty: true
 
   # Driver service - connects to robot and exposes ROS2 services
+  # Python lifecycle manager waits for robot, launches vendor driver,
+  # detects disconnection, and auto-reconnects.
   dobot-driver:
     extends: dobot
     restart: unless-stopped
     environment:
       - IP_address=${ROBOT_IP:-192.168.5.1}
       - DOBOT_TYPE=${ROBOT_TYPE:-cr5}
-    command: >
-      bash -c "
-        rm -f /tmp/dobot-shared/driver_restart;
-        while true; do
-          ros2 launch cr_robot_ros2 dobot_bringup_ros2.launch.py &
-          PID=$$!;
-          while kill -0 $$PID 2>/dev/null; do
-            if [ -f /tmp/dobot-shared/driver_restart ]; then
-              echo 'Restart signal received — killing driver';
-              rm -f /tmp/dobot-shared/driver_restart;
-              kill $$PID 2>/dev/null;
-              wait $$PID 2>/dev/null;
-              break;
-            fi;
-            sleep 1;
-          done;
-          echo 'Driver exited, restarting in 2s...';
-          sleep 2;
-        done
-      "
+    command: python3 /dobot-ros/dobot_ros/driver.py
 
   # CLI service - for running dobot-ros commands
   dobot-cli:

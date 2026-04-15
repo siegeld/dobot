@@ -16,15 +16,18 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 import rclpy
 from rclpy.executors import MultiThreadedExecutor
 from dobot_ros.config import Config
 from dobot_ros.ros_client import DobotRosClient
+from dobot_ros.web.settings_store import (
+    SettingsStore, SettingsBlocked, SettingsNotFound, SettingsConflict, SettingsError,
+)
 
 
 # ── Global state ────────────────────────────────────────────────
@@ -35,7 +38,10 @@ _config: Optional[Config] = None
 _lock = threading.Lock()
 _ws_clients: set = set()
 
-# Cached state for polling
+# Cached state for polling.
+# speed_factor starts at -1 to indicate "unknown" until we've reconciled with
+# the robot or the settings store; the UI treats -1 as "--". See below —
+# _get_client() pushes the stored jog.speed to the robot on first connect.
 _state = {
     "connected": False,
     "robot_mode": -1,
@@ -44,7 +50,7 @@ _state = {
     "gripper_position": -1,
     "gripper_state": -1,
     "gripper_initialized": False,
-    "speed_factor": 50,
+    "speed_factor": -1,
     "last_update": 0,
     "uptime_start": 0,
     "error": None,
@@ -68,6 +74,21 @@ def _get_client() -> DobotRosClient:
         # continuously — no more fighting between poll thread and API calls.
         spin_thread = threading.Thread(target=_executor.spin, daemon=True)
         spin_thread.start()
+
+        # Reconcile global speed with the settings store so the status display
+        # reflects reality, not the cached default. Fire and forget — the robot
+        # may not accept the command until Enable, in which case the next
+        # /api/speed or /api/enable call will push it again.
+        try:
+            stored = int(_settings_store.get("jog").get("speed", 5))
+        except Exception:
+            stored = 5
+        try:
+            _client.set_speed_factor(stored)
+        except Exception as e:
+            logging.info("startup set_speed_factor(%d) deferred: %s", stored, e)
+        with _lock:
+            _state["speed_factor"] = stored
     return _client
 
 
@@ -86,11 +107,12 @@ def _poll_state():
                     angles = client.get_joint_angles()
                     pose = client.get_cartesian_pose()
                     mode = client.get_robot_mode()
+                    stale = client.is_feedback_stale(max_age=5.0)
                     _state["joint"] = angles
                     _state["cartesian"] = pose
                     _state["robot_mode"] = mode
-                    _state["connected"] = True
-                    _state["error"] = None
+                    _state["connected"] = not stale
+                    _state["error"] = "Robot feedback stale — robot may be offline" if stale else None
                     _state["last_update"] = time.time()
                 except Exception as e:
                     _state["connected"] = False
@@ -101,15 +123,6 @@ def _poll_state():
                 _state["gripper_initialized"] = client.gripper_get_init_status() == 1
         except Exception:
             _state["connected"] = False
-        # Watchdog: if feedback port (30004) is dead, kill the driver node
-        # so the restart loop in the container relaunches it
-        try:
-            if client.is_feedback_stale(max_age=5.0):
-                logging.warning('Feedback port stale — signaling driver restart')
-                Path('/tmp/dobot-shared/driver_restart').touch()
-                time.sleep(10)  # wait for driver to restart
-        except Exception:
-            pass
         time.sleep(0.2)  # 5 Hz
 
 
@@ -283,12 +296,17 @@ async def stop_drag():
 
 @app.post("/api/speed")
 async def set_speed(req: SpeedRequest):
-    """Set global speed factor."""
+    """Set global speed factor. Also persists to the settings store so the
+    value survives container restarts."""
     try:
         client = _get_client()
         res = client.set_speed_factor(req.speed)
         with _lock:
             _state["speed_factor"] = req.speed
+        try:
+            _settings_store.patch("jog", {"speed": int(req.speed)})
+        except Exception as e:
+            logging.warning("persisting jog.speed failed: %s", e)
         return {"success": True, "result": res}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -738,8 +756,12 @@ _CAMERA_FILE = Path(__file__).parent / "camera_state.json"
 
 @app.get("/api/camera")
 async def get_camera():
-    """Get saved camera view."""
+    """Get saved camera view (now stored in settings_store under 'camera_view')."""
     try:
+        view = _settings_store.get("camera_view")
+        if view:
+            return view
+        # Fallback to legacy file if the store is empty.
         if _CAMERA_FILE.exists():
             return json.loads(_CAMERA_FILE.read_text())
     except Exception:
@@ -749,12 +771,525 @@ async def get_camera():
 
 @app.post("/api/camera")
 async def save_camera(request: dict):
-    """Save camera view (position + target)."""
+    """Save camera view (position + target) — routes through settings store."""
     try:
-        _CAMERA_FILE.write_text(json.dumps(request, indent=2))
+        _settings_store.set_group("camera_view", request)
         return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# ── VLA (Vision-Language-Action) ─────────────────────────────────
+#
+# Recorder + executor live in dobot_ros.vla. The web layer owns singleton
+# instances so multiple clients hitting the dashboard see shared state.
+# See VLA.md for the full design.
+
+_vla_recorder = None
+_vla_executor = None
+_vla_lock = threading.Lock()
+
+VLA_EPISODES_DIR = os.environ.get("VLA_EPISODES_DIR", "/data/episodes")
+VLA_OFT_URL = os.environ.get("VLA_OFT_URL", "http://gpurbr2:7071")
+
+
+# ── Settings store (single source of truth for persistent UI + VLA + servo config) ─
+
+_SETTINGS_DIR = Path(__file__).parent / "settings"
+
+_SETTINGS_DEFAULTS = {
+    "servo": {
+        "servo_rate_hz": 30.0, "t": 0.05,
+        "aheadtime": 50.0, "gain": 500.0,
+    },
+    "vla": {
+        "server_url": VLA_OFT_URL,
+        "servo_rate_hz": 30.0,
+        "model_rate_hz": 10.0,
+        "chunk_actions_to_execute": 4,
+        "gripper_threshold": 0.1,
+        "unnorm_key": None,
+    },
+    "table_plane": {},
+    "camera_view": {},
+    "gripper": {"force": 20, "speed": 50},
+    "jog": {"linear_step": 5, "angular_step": 5, "speed": 5, "mode": "user"},
+}
+
+# Legacy per-file JSON paths migrate into the store on first startup.
+_SETTINGS_LEGACY = {
+    "table_plane": Path(__file__).parent / "table_plane.json",
+    "camera_view": Path(__file__).parent / "camera_state.json",
+}
+
+_settings_store: Optional[SettingsStore] = SettingsStore(
+    base_dir=_SETTINGS_DIR,
+    defaults=_SETTINGS_DEFAULTS,
+    legacy_files=_SETTINGS_LEGACY,
+)
+
+
+def _settings_load_safety_check():
+    """Guard used when loading a saved settings bundle — refuses when the
+    robot is moving, in an error/collision state, or when streaming control
+    paths (servo tester, VLA executor/recorder) are active.
+
+    See feedback_always_safe memory.
+    """
+    reasons = []
+    try:
+        if _servo_tester is not None and _servo_tester.is_running():
+            reasons.append("servo tester is running — stop it first")
+    except Exception:
+        pass
+    try:
+        if _vla_executor is not None and _vla_executor.is_running():
+            reasons.append("VLA executor is running — stop it first")
+    except Exception:
+        pass
+    try:
+        if _vla_recorder is not None and _vla_recorder.is_recording():
+            reasons.append("VLA recorder is recording — stop it first")
+    except Exception:
+        pass
+
+    unsafe_modes = {6: "BACKDRIVE/drag", 7: "RUNNING", 9: "ERROR", 11: "COLLISION"}
+    mode = _state.get("robot_mode", -1)
+    if mode in unsafe_modes:
+        reasons.append(f"robot is in {unsafe_modes[mode]} mode — stop/clear first")
+
+    return (not reasons, reasons)
+
+
+def _get_vla_recorder():
+    global _vla_recorder
+    with _vla_lock:
+        if _vla_recorder is None:
+            from dobot_ros.vla.recorder import EpisodeRecorder, CameraFrameSource
+            _vla_recorder = EpisodeRecorder(
+                ros_client=_get_client(),
+                camera=CameraFrameSource(camera_url=CAMERA_URL),
+                episodes_dir=VLA_EPISODES_DIR,
+                rate_hz=10.0,
+            )
+        return _vla_recorder
+
+
+@app.get("/api/vla/status")
+async def vla_status():
+    """Combined status of recorder + executor + OFT server health."""
+    from dobot_ros.vla.client import OFTClient
+
+    rec = _vla_recorder
+    ex = _vla_executor
+
+    server_health = None
+    try:
+        server_health = OFTClient(base_url=VLA_OFT_URL, timeout=1.5).health()
+    except Exception as e:
+        server_health = {"status": "unreachable", "error": str(e)}
+
+    return {
+        "recording": rec.is_recording() if rec else False,
+        "executing": ex.is_running() if ex else False,
+        "executor": (ex.status().__dict__ if ex else None),
+        "server_url": VLA_OFT_URL,
+        "server": server_health,
+        "episodes_dir": VLA_EPISODES_DIR,
+    }
+
+
+@app.get("/api/vla/episodes")
+async def vla_list_episodes():
+    from dobot_ros.vla.recorder import list_episodes
+    return {"episodes": list_episodes(VLA_EPISODES_DIR)}
+
+
+class VLARecordStart(BaseModel):
+    instruction: str
+    name: Optional[str] = None
+
+
+@app.post("/api/vla/record/start")
+async def vla_record_start(req: VLARecordStart):
+    try:
+        rec = _get_vla_recorder()
+        # Auto-enter drag mode for kinesthetic teaching.
+        try:
+            _get_client().start_drag()
+        except Exception as e:
+            logging.warning("start_drag failed (continuing): %s", e)
+        ep_dir = rec.start(req.instruction, episode_name=req.name)
+        return {"success": True, "episode_dir": str(ep_dir)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/vla/record/stop")
+async def vla_record_stop():
+    try:
+        rec = _get_vla_recorder()
+        sealed = rec.stop()
+        try:
+            _get_client().stop_drag()
+        except Exception:
+            pass
+        return {"success": True, "episode_dir": str(sealed) if sealed else None}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+class VLAExecuteStart(BaseModel):
+    instruction: str
+    server_url: Optional[str] = None
+    servo_rate_hz: Optional[float] = None
+    model_rate_hz: Optional[float] = None
+    chunk_actions_to_execute: Optional[int] = None
+    unnorm_key: Optional[str] = None
+
+
+@app.post("/api/vla/execute/start")
+async def vla_execute_start(req: VLAExecuteStart):
+    global _vla_executor
+    try:
+        with _vla_lock:
+            if _vla_executor is not None and _vla_executor.is_running():
+                return {"success": False, "error": "executor already running"}
+
+            from dobot_ros.vla.executor import VLAExecutor, ExecutorConfig
+            from dobot_ros.vla.recorder import CameraFrameSource
+
+            # Pull defaults from the settings store; request values override per-run.
+            vla_cfg = _settings_store.get("vla")
+
+            table_plane_path = str(Path(__file__).parent / "table_plane.json")
+            if not Path(table_plane_path).exists():
+                table_plane_path = None
+
+            cfg = ExecutorConfig(
+                instruction=req.instruction,
+                server_url=req.server_url or vla_cfg.get("server_url") or VLA_OFT_URL,
+                servo_rate_hz=req.servo_rate_hz if req.servo_rate_hz is not None else vla_cfg.get("servo_rate_hz", 30.0),
+                model_rate_hz=req.model_rate_hz if req.model_rate_hz is not None else vla_cfg.get("model_rate_hz", 10.0),
+                chunk_actions_to_execute=req.chunk_actions_to_execute if req.chunk_actions_to_execute is not None else vla_cfg.get("chunk_actions_to_execute", 4),
+                gripper_threshold=vla_cfg.get("gripper_threshold", 0.1),
+                table_plane_path=table_plane_path,
+                unnorm_key=req.unnorm_key if req.unnorm_key is not None else vla_cfg.get("unnorm_key"),
+            )
+            _vla_executor = VLAExecutor(
+                ros_client=_get_client(),
+                config=cfg,
+                camera=CameraFrameSource(camera_url=CAMERA_URL),
+            )
+            _vla_executor.start()
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/vla/execute/stop")
+async def vla_execute_stop():
+    try:
+        ex = _vla_executor
+        if ex is None:
+            return {"success": True, "note": "no executor"}
+        ex.stop()
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ── Servo Tester (ServoP streaming) ─────────────────────────────
+#
+# Additive: this is a manual tool for validating ServoP behavior. It does not
+# replace any existing motion path (MovJ, MovL, jog, pick, calibrate all keep
+# working exactly as before). See the servo/ module for details.
+
+_servo_tester = None
+_servo_lock = threading.Lock()
+
+
+def _get_servo_tester():
+    global _servo_tester
+    with _servo_lock:
+        if _servo_tester is None:
+            from dobot_ros.servo.tester import ServoTester, ServoConfig
+            from dobot_ros.vla.safety import SafetyLimits
+
+            # Initial config from the settings store so last tuning persists.
+            cfg_dict = _settings_store.get("servo")
+            cfg = ServoConfig(**{
+                k: v for k, v in cfg_dict.items()
+                if k in ("servo_rate_hz", "t", "aheadtime", "gain", "idle_timeout_s")
+            })
+
+            # Workspace limits from the store's table_plane group (falls back
+            # to the legacy file if that's all we have).
+            tp = _settings_store.get("table_plane")
+            if tp and (tp.get("corners") or tp.get("points")):
+                tp_file = _SETTINGS_DIR / "table_plane_for_tester.json"
+                tp_file.write_text(json.dumps(tp))
+                limits = SafetyLimits.from_table_plane(tp_file)
+            else:
+                legacy = Path(__file__).parent / "table_plane.json"
+                limits = SafetyLimits.from_table_plane(legacy) if legacy.exists() else SafetyLimits()
+
+            _servo_tester = ServoTester(
+                ros_client=_get_client(), config=cfg, limits=limits,
+            )
+
+            # Subscribe so future store updates push into the running tester.
+            def _on_servo_change(new_cfg: dict):
+                try:
+                    _servo_tester.update_config(**{
+                        k: v for k, v in new_cfg.items()
+                        if k in ("servo_rate_hz", "t", "aheadtime", "gain", "idle_timeout_s")
+                    })
+                except Exception:
+                    logging.exception("failed to apply servo settings update")
+
+            _settings_store.subscribe("servo", _on_servo_change)
+        return _servo_tester
+
+
+class ServoStartRequest(BaseModel):
+    servo_rate_hz: Optional[float] = None
+    t: Optional[float] = None
+    aheadtime: Optional[float] = None
+    gain: Optional[float] = None
+    csv_log: Optional[bool] = False
+
+
+@app.post("/api/servo/start")
+async def servo_start(req: ServoStartRequest):
+    try:
+        tester = _get_servo_tester()
+        # Apply tuning before starting.
+        kwargs = {k: v for k, v in req.dict().items()
+                  if k in ("servo_rate_hz", "t", "aheadtime", "gain") and v is not None}
+        if kwargs:
+            tester.update_config(**kwargs)
+        if req.csv_log:
+            ts = int(time.time())
+            tester.log_csv_path = f"/data/servo-logs/servo_{ts}.csv"
+        status = tester.start()
+        return {"success": True, "status": status.__dict__}
+    except Exception as e:
+        logging.exception("servo start failed")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/servo/stop")
+async def servo_stop(call_robot_stop: bool = False):
+    try:
+        tester = _get_servo_tester()
+        tester.stop(call_robot_stop=call_robot_stop)
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/servo/estop")
+async def servo_estop():
+    """Emergency stop: halt thread AND tell the controller to Stop."""
+    try:
+        tester = _get_servo_tester()
+        tester.emergency_stop()
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+class ServoTargetRequest(BaseModel):
+    offset: list  # 6-D: [dx, dy, dz, drx, dry, drz]
+
+
+@app.post("/api/servo/target")
+async def servo_target(req: ServoTargetRequest):
+    try:
+        tester = _get_servo_tester()
+        status = tester.set_target_offset(req.offset)
+        return {"success": True, "status": status.__dict__}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+class ServoPatternRequest(BaseModel):
+    name: str
+    params: Optional[dict] = None
+
+
+@app.post("/api/servo/pattern")
+async def servo_pattern(req: ServoPatternRequest):
+    try:
+        from dobot_ros.servo.patterns import build_pattern
+        tester = _get_servo_tester()
+        pat = build_pattern(req.name, req.params or {})
+        status = tester.set_pattern(pat, name=req.name)
+        return {"success": True, "status": status.__dict__}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/servo/config")
+async def servo_config(req: dict):
+    try:
+        # Route config updates through the settings store — this both persists
+        # the value to last_settings.json and notifies the running tester via
+        # the subscribe hook.
+        filtered = {k: v for k, v in req.items()
+                    if k in ("servo_rate_hz", "t", "aheadtime", "gain", "idle_timeout_s")}
+        _settings_store.patch("servo", filtered)
+        tester = _get_servo_tester()
+        return {"success": True, "status": tester.status().__dict__}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/servo/status")
+async def servo_status():
+    tester = _servo_tester
+    if tester is None:
+        return {"running": False, "initialized": False}
+    st = tester.status()
+    return {"running": st.running, "initialized": True, **st.__dict__}
+
+
+# ── Settings store endpoints ─────────────────────────────────────
+#
+# All persistent settings (servo tuning, VLA defaults, table plane, camera
+# view, gripper/jog defaults) are managed by the SettingsStore.
+#
+# Safety: /api/settings/saved/{name}/load is gated by _settings_load_safety_check.
+# It refuses (HTTP 409) when the robot is moving, errored, or streaming.
+
+
+@app.get("/api/settings/current")
+async def settings_current():
+    return {"settings": _settings_store.get_all()}
+
+
+@app.patch("/api/settings/current")
+async def settings_patch_current(req: dict):
+    """Merge a partial update into current settings. Expected shape:
+    {"servo": {"gain": 700}}  or  {"gripper": {"force": 30}, "jog": {"speed": 10}}
+    """
+    try:
+        if not isinstance(req, dict):
+            raise ValueError("body must be a JSON object keyed by group name")
+        for group, partial in req.items():
+            if not isinstance(partial, dict):
+                raise ValueError(f"group '{group}' value must be an object")
+            _settings_store.patch(group, partial)
+        return {"success": True, "settings": _settings_store.get_all()}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
+
+
+@app.get("/api/settings/saved")
+async def settings_list_saved():
+    return {"saved": _settings_store.list_saved()}
+
+
+class SettingsSaveRequest(BaseModel):
+    name: str
+    description: str = ""
+
+
+@app.post("/api/settings/saved")
+async def settings_save(req: SettingsSaveRequest):
+    try:
+        meta = _settings_store.save_current_as(req.name, req.description)
+        return {"success": True, "saved": meta}
+    except SettingsConflict as e:
+        return JSONResponse(status_code=409, content={"success": False, "error": str(e)})
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
+
+
+@app.get("/api/settings/saved/{name}")
+async def settings_get_saved(name: str):
+    try:
+        return _settings_store.get_saved(name)
+    except SettingsNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/api/settings/saved/{name}/download")
+async def settings_download_saved(name: str):
+    try:
+        bundle = _settings_store.get_saved(name)
+        content = json.dumps(bundle, indent=2)
+        from fastapi.responses import Response
+        return Response(
+            content=content, media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{name}.json"'},
+        )
+    except SettingsNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+class SettingsSavedPatch(BaseModel):
+    new_name: Optional[str] = None
+    description: Optional[str] = None
+
+
+@app.patch("/api/settings/saved/{name}")
+async def settings_patch_saved(name: str, req: SettingsSavedPatch):
+    try:
+        result = None
+        if req.new_name is not None and req.new_name != name:
+            result = _settings_store.rename_saved(name, req.new_name)
+            name = req.new_name  # subsequent update uses new name
+        if req.description is not None:
+            result = _settings_store.update_description(name, req.description)
+        if result is None:
+            result = {"slug": name}
+        return {"success": True, "saved": result}
+    except SettingsNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except SettingsConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/settings/saved/{name}")
+async def settings_delete_saved(name: str):
+    try:
+        _settings_store.delete_saved(name)
+        return {"success": True}
+    except SettingsNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/settings/saved/{name}/load")
+async def settings_load_saved(name: str):
+    """Load a saved bundle into current settings. Refuses (409) when the robot
+    is in motion, errored, or a streaming control path is active."""
+    try:
+        _settings_store.load_saved(name, safety_check=_settings_load_safety_check)
+        return {"success": True, "settings": _settings_store.get_all()}
+    except SettingsBlocked as e:
+        return JSONResponse(
+            status_code=409,
+            content={"success": False, "error": "blocked by safety check", "reasons": e.reasons},
+        )
+    except SettingsNotFound as e:
+        return JSONResponse(status_code=404, content={"success": False, "error": str(e)})
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
+
+
+@app.post("/api/settings/saved/import")
+async def settings_import_saved(bundle: dict):
+    """Import a previously downloaded JSON bundle. Body is the JSON directly
+    (no multipart needed — the frontend reads the file and POSTs the parsed JSON)."""
+    try:
+        meta = _settings_store.import_bundle(bundle)
+        return {"success": True, "saved": meta}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
 
 
 # ── WebSocket ───────────────────────────────────────────────────
@@ -801,14 +1336,37 @@ async def ws_state(websocket: WebSocket):
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+# Dev convenience: the HTML/JS/CSS in static/ changes often during active
+# development; serving the HTML entry points with no-cache keeps iframe and
+# browser caches from pinning stale copies.
+_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
 @app.get("/")
 async def index():
-    return FileResponse(str(STATIC_DIR / "index.html"))
+    return FileResponse(str(STATIC_DIR / "index.html"), headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/pendant")
 async def pendant():
-    return FileResponse(str(STATIC_DIR / "pendant.html"))
+    return FileResponse(str(STATIC_DIR / "pendant.html"), headers=_NO_CACHE_HEADERS)
+
+
+@app.middleware("http")
+async def _no_cache_js(request, call_next):
+    """Also prevent caching of our own JS/CSS so edits during development show up
+    immediately. Static third-party assets from CDN are unaffected."""
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/static/js/") or path.startswith("/static/css/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 
 # ── Run ─────────────────────────────────────────────────────────

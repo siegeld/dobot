@@ -29,6 +29,8 @@ from dobot_msgs_v4.srv import (
     MovJ,
     RelMovLUser,
     RelMovLTool,
+    ServoP,
+    ServoJ,
     SpeedFactor,
     StartDrag,
     StopDrag,
@@ -124,6 +126,10 @@ class DobotRosClient(Node):
             StartDrag, f'{self._srv_prefix}StartDrag')
         self._stop_drag_client = self.create_client(
             StopDrag, f'{self._srv_prefix}StopDrag')
+        self._servo_p_client = self.create_client(
+            ServoP, f'{self._srv_prefix}ServoP')
+        self._servo_j_client = self.create_client(
+            ServoJ, f'{self._srv_prefix}ServoJ')
 
         # ── Gripper node clients ────────────────────────────────
         self._gripper_init_client = self.create_client(
@@ -290,6 +296,75 @@ class DobotRosClient(Node):
         request = SpeedFactor.Request()
         request.ratio = speed
         response = self._call_service(self._speed_factor_client, request)
+        return response.res
+
+    def servo_p(
+        self,
+        pose: List[float],
+        t: float = 0.1,
+        aheadtime: float = 50.0,
+        gain: float = 500.0,
+    ) -> int:
+        """Stream an absolute cartesian pose via ServoP for high-rate servo control.
+
+        Unlike MovJ/MovL (point-to-point with trajectory planning), ServoP is a
+        continuous-servo interface: call it repeatedly with updated targets at
+        20-100+ Hz for smooth streaming motion. Used by the VLA executor.
+
+        t: intended interpolation time to reach this pose (s), range [0.004, 3600].
+        aheadtime: D-term of internal PID, range [20, 100]. Default 50.
+        gain: P-term of internal PID, range [200, 1000]. Default 500.
+
+        ServoP expects monotonic streaming — pausing halts the controller.
+        """
+        if len(pose) != 6:
+            raise ValueError("Must provide [X, Y, Z, RX, RY, RZ]")
+        request = ServoP.Request()
+        request.a = float(pose[0])
+        request.b = float(pose[1])
+        request.c = float(pose[2])
+        request.d = float(pose[3])
+        request.e = float(pose[4])
+        request.f = float(pose[5])
+        # Optional tuning params are passed as key=value strings per the
+        # Dobot TCP-IP protocol convention.
+        params = []
+        if t != -1:
+            params.append(f"t={t:f}")
+        if aheadtime != -1:
+            params.append(f"aheadtime={aheadtime:f}")
+        if gain != -1:
+            params.append(f"gain={gain:f}")
+        request.param_value = params
+        response = self._call_service(self._servo_p_client, request)
+        return response.res
+
+    def servo_j(
+        self,
+        joints: List[float],
+        t: float = 0.1,
+        aheadtime: float = 50.0,
+        gain: float = 500.0,
+    ) -> int:
+        """Stream absolute joint angles via ServoJ (joint-space analog of servo_p)."""
+        if len(joints) != 6:
+            raise ValueError("Must provide exactly 6 joint angles")
+        request = ServoJ.Request()
+        request.a = float(joints[0])
+        request.b = float(joints[1])
+        request.c = float(joints[2])
+        request.d = float(joints[3])
+        request.e = float(joints[4])
+        request.f = float(joints[5])
+        params = []
+        if t != -1:
+            params.append(f"t={t:f}")
+        if aheadtime != -1:
+            params.append(f"aheadtime={aheadtime:f}")
+        if gain != -1:
+            params.append(f"gain={gain:f}")
+        request.param_value = params
+        response = self._call_service(self._servo_j_client, request)
         return response.res
 
     def move_pose(self, pose: List[float]) -> int:
