@@ -227,7 +227,6 @@
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-calibration-btn" data-bs-toggle="tab" data-bs-target="#tab-calibration" type="button" role="tab">
             <i class="bi bi-crosshair"></i> Calibration
-            <span id="cal-status-badge" class="badge bg-secondary ms-1">--</span>
           </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -414,130 +413,201 @@
 
         <!-- ─── Calibration Tab ─── -->
         <div class="tab-pane fade" id="tab-calibration" role="tabpanel" aria-labelledby="tab-calibration-btn">
+
+          <!-- Phase indicator -->
           <div class="card mb-2">
-            <div class="card-header">
-              <i class="bi bi-crosshair"></i> Workspace &amp; Camera Calibration
+            <div class="card-body py-2">
+              <div class="d-flex align-items-center gap-3 flex-wrap">
+                <strong>Setup → Pick:</strong>
+                <span id="cal-phase-1" class="badge bg-secondary" data-bs-toggle="tooltip"
+                      title="Touch the gripper tip to the table surface and record the wrist Z. Only needed once per mounting.">
+                  1. Table Z: <span id="cal-phase-1-state">?</span>
+                </span>
+                <span id="cal-phase-2" class="badge bg-secondary" data-bs-toggle="tooltip"
+                      title="Record 3+ (pixel, robot XYZ) correspondences and solve for the camera-to-robot transform.">
+                  2. Camera: <span id="cal-phase-2-state">?</span>
+                </span>
+                <span id="cal-phase-3" class="badge bg-secondary" data-bs-toggle="tooltip"
+                      title="Click an object or pixel in the camera view, preview the planned motion, confirm to pick.">
+                  3. Pick: <span id="cal-phase-3-state">waiting</span>
+                </span>
+                <span class="ms-auto text-muted small" id="cal-status-badge">Not Calibrated</span>
+              </div>
             </div>
-            <div class="card-body">
-              <div class="row g-2 mb-3">
-                <div class="col-md-6">
-                  <h6 class="section-label">Status</h6>
-                  <table class="table table-sm table-borderless mb-0 info-table">
-                    <tr><td class="text-muted">Table</td><td id="cal-main-table-status">--</td></tr>
-                    <tr><td class="text-muted">Size</td><td id="cal-main-table-size">--</td></tr>
-                    <tr><td class="text-muted">Camera</td><td id="cal-main-cam-status">--</td></tr>
-                  </table>
-                </div>
-                <div class="col-md-6">
-                  <h6 class="section-label">Workspace Moves</h6>
-                  <div class="d-flex gap-1 mb-1">
-                    <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="center">Center</button>
-                    <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c1">C1</button>
-                    <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c2">C2</button>
-                    <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c3">C3</button>
-                    <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c4">C4</button>
+          </div>
+
+          <div class="row g-2">
+            <!-- Camera view (dominant) -->
+            <div class="col-md-8">
+              <div class="card">
+                <div class="card-header d-flex align-items-center gap-3 py-2">
+                  <button class="btn btn-outline-info btn-sm" id="btn-cal-refresh-feed"
+                          data-bs-toggle="tooltip" title="Reload the camera frame. Auto-fires when you open this tab.">
+                    <i class="bi bi-camera"></i> Refresh
+                  </button>
+                  <div class="form-check form-check-sm m-0" data-bs-toggle="tooltip"
+                       title="Overlay bounding boxes from the camera's object detection. Click a box to select that object as a pick target.">
+                    <input class="form-check-input" type="checkbox" id="cal-show-objects" checked>
+                    <label class="form-check-label small" for="cal-show-objects">Show detected objects</label>
                   </div>
-                  <div class="d-flex align-items-center gap-2">
-                    <small class="text-muted">Height:</small>
-                    <input type="number" class="form-control form-control-sm" id="cal-main-ws-height"
-                           value="127" min="25" max="500" step="10" style="width:70px;">
-                    <small class="text-muted">mm</small>
+                  <small class="text-muted ms-auto">
+                    Pixel: <span id="cal-pixel" class="text-info">--</span>
+                    &nbsp;·&nbsp; Depth: <span id="cal-depth-live" class="text-warning">--</span>
+                  </small>
+                </div>
+                <div class="card-body p-2">
+                  <div id="cal-camera-container" style="position:relative; width:100%; overflow:hidden;">
+                    <img id="cal-camera-feed" src="" alt="Camera view"
+                         class="img-fluid rounded" style="cursor:crosshair; display:none; width:100%;">
+                    <canvas id="cal-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
+                    <canvas id="cal-obj-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right rail -->
+            <div class="col-md-4">
+
+              <!-- Pick target + preview (primary action once calibrated) -->
+              <div class="card mb-2" id="cal-pick-card">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                  <span><i class="bi bi-hand-index-thumb"></i> Pick target</span>
+                  <button class="btn btn-outline-secondary btn-xs" id="btn-cal-refresh-objects"
+                          data-bs-toggle="tooltip" title="Re-fetch the detected-objects list.">
+                    <i class="bi bi-arrow-clockwise"></i>
+                  </button>
+                </div>
+                <div class="card-body py-2">
+                  <div id="cal-pick-target" class="small text-muted mb-2">
+                    Click an object or pixel in the camera view to select a target.
+                  </div>
+                  <div id="cal-pick-preview" class="small" style="display:none;">
+                    <table class="table table-sm table-borderless mb-2 info-table">
+                      <tr><td class="text-muted">Camera XYZ</td><td id="cal-pick-cam-xyz">--</td></tr>
+                      <tr><td class="text-muted">Robot XYZ</td><td id="cal-pick-rob-xyz">--</td></tr>
+                      <tr><td class="text-muted">Approach</td><td id="cal-pick-approach">--</td></tr>
+                      <tr><td class="text-muted">Grasp</td><td id="cal-pick-grasp">--</td></tr>
+                      <tr><td class="text-muted">Retract</td><td id="cal-pick-retract">--</td></tr>
+                    </table>
+                    <div id="cal-pick-warnings" class="text-warning small mb-2" style="display:none;"></div>
+                    <div class="d-flex gap-2">
+                      <button class="btn btn-success btn-sm flex-fill" id="btn-cal-pick-execute"
+                              data-bs-toggle="tooltip" data-bs-html="true"
+                              title="<b>Execute the pick.</b><br>Open gripper → approach → descend to grasp → close gripper → retract. Uses MovL (queued), not streaming servo.">
+                        <i class="bi bi-play-fill"></i> Pick
+                      </button>
+                      <button class="btn btn-outline-secondary btn-sm" id="btn-cal-pick-cancel"
+                              data-bs-toggle="tooltip" title="Clear the current target without moving.">
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div class="row">
-                <div class="col-8">
-                  <div id="cal-camera-container" style="position:relative; display:inline-block; width:100%; overflow:hidden;">
-                    <img id="cal-camera-feed" src="" alt="Camera view"
-                         class="img-fluid rounded" style="cursor:crosshair; display:none; width:100%;"
-                         title="Click to select pixel for calibration">
-                    <canvas id="cal-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
-                  </div>
-                  <div class="mt-2 d-flex align-items-center gap-3">
-                    <button class="btn btn-outline-info btn-sm" id="btn-cal-refresh-feed">
-                      <i class="bi bi-camera"></i> Refresh View
-                    </button>
-                    <small class="text-muted">Selected pixel: <span id="cal-pixel" class="text-info">--</span></small>
-                    <small class="text-muted ms-2">Depth: <span id="cal-depth-live" class="text-warning">--</span></small>
-                  </div>
-                  <div id="cal-test-results" class="small mt-2" style="display:none;"></div>
+              <!-- Table Z (single-touch) -->
+              <div class="card mb-2">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                  <span><i class="bi bi-arrow-down-square"></i> Table Z</span>
+                  <small class="text-muted" id="cal-table-z-display">--</small>
                 </div>
-
-                <div class="col-4">
-                  <table class="table table-sm table-borderless mb-2 info-table">
-                    <tr><td class="text-muted">Points</td><td id="cal-num-points">0</td></tr>
-                    <tr><td class="text-muted">Error</td><td id="cal-error">--</td></tr>
-                    <tr><td class="text-muted">Table Z</td><td id="cal-table-status">--</td></tr>
-                  </table>
-                  <div class="d-flex align-items-center gap-2 mb-2">
+                <div class="card-body py-2">
+                  <p class="small text-muted mb-2">
+                    Touch the gripper tip to the table surface anywhere, then record.
+                    One point is enough for a flat, level table.
+                  </p>
+                  <button class="btn btn-warning btn-sm w-100 mb-2" id="btn-cal-table-z"
+                          data-bs-toggle="tooltip" title="Record the current wrist Z as the table floor. Assumes the gripper tip is touching the table surface.">
+                    <i class="bi bi-arrow-down-square"></i> Record Table Z
+                  </button>
+                  <div class="d-flex align-items-center gap-2">
                     <small class="text-muted">Min clearance:</small>
                     <input type="number" class="form-control form-control-sm" id="cal-min-clearance"
-                           value="25" min="0" max="200" step="5" style="width:70px;">
+                           value="25" min="0" max="200" step="5" style="width:70px;"
+                           data-bs-toggle="tooltip" title="Safety margin (mm) above recorded table Z. Grasp Z is never lower than table_z + this value.">
                     <small class="text-muted">mm</small>
                     <button class="btn btn-outline-info btn-xs" id="btn-cal-save-clearance">Save</button>
                   </div>
-                  <h6 class="text-muted small">Table / Workspace</h6>
-                  <div class="d-grid gap-2 mb-2">
-                    <button class="btn btn-outline-warning btn-sm" id="btn-cal-table-point">
-                      <i class="bi bi-arrow-down-square"></i> Record Table Point (<span id="cal-table-count">0</span>/4)
-                    </button>
-                  </div>
-                  <div class="d-flex align-items-center gap-2 mb-2">
-                    <small class="text-muted">Height above table:</small>
-                    <input type="number" class="form-control form-control-sm" id="cal-ws-height"
-                           value="127" min="25" max="500" step="10" style="width:70px;">
-                    <small class="text-muted">mm</small>
-                  </div>
-
-                  <h6 class="text-muted small">Camera Calibration</h6>
-                  <div class="d-grid gap-2 mb-3">
-                    <button class="btn btn-outline-success btn-sm" id="btn-cal-record">
-                      <i class="bi bi-plus-circle"></i> Record Camera Point
-                    </button>
-                    <button class="btn btn-outline-primary btn-sm" id="btn-cal-solve">
-                      <i class="bi bi-calculator"></i> Solve
-                    </button>
-                    <button class="btn btn-outline-info btn-sm" id="btn-cal-test">
-                      <i class="bi bi-bullseye"></i> Test
-                    </button>
-                    <button class="btn btn-outline-danger btn-sm" id="btn-cal-clear">
-                      <i class="bi bi-trash"></i> Clear All
-                    </button>
-                  </div>
-                  <button class="btn btn-outline-warning btn-sm w-100 mb-2" id="btn-cal-drag-toggle">
-                    <i class="bi bi-hand-index"></i> Enable Drag Mode
-                  </button>
-
-                  <h6 class="text-muted small mt-2">Jog Robot</h6>
-                  <div class="d-flex gap-1 mb-1">
-                    <button class="btn btn-outline-danger btn-xs flex-fill cal-jog" data-axis="x" data-dir="-1">X-</button>
-                    <button class="btn btn-outline-success btn-xs flex-fill cal-jog" data-axis="x" data-dir="1">X+</button>
-                    <button class="btn btn-outline-danger btn-xs flex-fill cal-jog" data-axis="y" data-dir="-1">Y-</button>
-                    <button class="btn btn-outline-success btn-xs flex-fill cal-jog" data-axis="y" data-dir="1">Y+</button>
-                  </div>
-                  <div class="d-flex gap-1 mb-1">
-                    <button class="btn btn-outline-danger btn-xs flex-fill cal-jog" data-axis="z" data-dir="-1">Z-</button>
-                    <button class="btn btn-outline-success btn-xs flex-fill cal-jog" data-axis="z" data-dir="1">Z+</button>
-                    <button class="btn btn-outline-danger btn-xs flex-fill cal-jog" data-axis="rz" data-dir="-1">RZ-</button>
-                    <button class="btn btn-outline-success btn-xs flex-fill cal-jog" data-axis="rz" data-dir="1">RZ+</button>
-                  </div>
-                  <div class="d-flex align-items-center gap-2 mb-2">
-                    <small class="text-muted">Step:</small>
-                    <select id="cal-jog-step" class="form-select form-select-sm" style="width:auto;">
-                      <option value="1">1mm</option>
-                      <option value="5" selected>5mm</option>
-                      <option value="10">10mm</option>
-                      <option value="25">25mm</option>
-                      <option value="50">50mm</option>
-                    </select>
-                    <small class="text-muted ms-1" id="cal-robot-pos">--</small>
-                  </div>
-
-                  <h6 class="text-muted small">Recorded Points</h6>
-                  <div id="cal-points-list" class="small" style="max-height:200px; overflow-y:auto;"></div>
+                  <details class="mt-2">
+                    <summary class="small text-muted" data-bs-toggle="tooltip"
+                             title="Legacy 4-point / plane-fit workflow. Only needed if the table is noticeably tilted.">
+                      Advanced: 4-point plane fit
+                    </summary>
+                    <div class="mt-2">
+                      <button class="btn btn-outline-warning btn-sm w-100 mb-2" id="btn-cal-table-point">
+                        Record table point (<span id="cal-table-count">0</span>/4)
+                      </button>
+                      <div class="d-flex gap-1 flex-wrap mb-2">
+                        <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="center">Ctr</button>
+                        <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c1">C1</button>
+                        <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c2">C2</button>
+                        <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c3">C3</button>
+                        <button class="btn btn-outline-info btn-xs flex-fill cal-ws-move" data-pos="c4">C4</button>
+                      </div>
+                      <div class="d-flex align-items-center gap-2">
+                        <small class="text-muted">Height:</small>
+                        <input type="number" class="form-control form-control-sm" id="cal-main-ws-height"
+                               value="127" min="25" max="500" step="10" style="width:70px;">
+                        <small class="text-muted">mm</small>
+                      </div>
+                    </div>
+                  </details>
                 </div>
               </div>
+
+              <!-- Camera calibration -->
+              <div class="card mb-2">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                  <span><i class="bi bi-camera"></i> Camera calibration</span>
+                  <small class="text-muted">
+                    <span id="cal-num-points">0</span> pts · err <span id="cal-error">--</span>
+                  </small>
+                </div>
+                <div class="card-body py-2">
+                  <p class="small text-muted mb-2">
+                    Jog the TCP to a point visible to the camera, click that pixel in the view, then Record. Need 3+ points. Solve once.
+                  </p>
+                  <div class="d-grid gap-2 mb-2">
+                    <button class="btn btn-outline-success btn-sm" id="btn-cal-record"
+                            data-bs-toggle="tooltip" title="Record a (pixel, robot XYZ) correspondence. Click a pixel first.">
+                      <i class="bi bi-plus-circle"></i> Record camera point
+                    </button>
+                    <div class="d-flex gap-2">
+                      <button class="btn btn-outline-primary btn-sm flex-fill" id="btn-cal-solve"
+                              data-bs-toggle="tooltip" title="Solve the transform once you have ≥3 points.">
+                        Solve
+                      </button>
+                      <button class="btn btn-outline-info btn-sm flex-fill" id="btn-cal-test"
+                              data-bs-toggle="tooltip" title="Compare predicted vs actual robot positions for detected objects.">
+                        Test
+                      </button>
+                      <button class="btn btn-outline-danger btn-sm flex-fill" id="btn-cal-clear"
+                              data-bs-toggle="tooltip" title="Clear all recorded calibration points.">
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                  <button class="btn btn-outline-warning btn-sm w-100" id="btn-cal-drag-toggle"
+                          data-bs-toggle="tooltip" title="Toggle drag mode for hand-guiding the robot to calibration points.">
+                    <i class="bi bi-hand-index"></i> Enable Drag Mode
+                  </button>
+                  <div id="cal-test-results" class="small mt-2" style="display:none;"></div>
+                  <details class="mt-2">
+                    <summary class="small text-muted">Recorded points</summary>
+                    <div id="cal-points-list" class="small mt-1" style="max-height:200px; overflow-y:auto;"></div>
+                  </details>
+                </div>
+              </div>
+
+              <!-- Hidden legacy IDs so existing handlers don't break -->
+              <span id="cal-main-table-status" class="d-none">--</span>
+              <span id="cal-main-table-size" class="d-none">--</span>
+              <span id="cal-main-cam-status" class="d-none">--</span>
+              <span id="cal-table-status" class="d-none">--</span>
+              <span id="cal-robot-pos" class="d-none">--</span>
+              <input id="cal-ws-height" type="hidden" value="127">
+              <select id="cal-jog-step" class="d-none"><option value="5">5</option></select>
             </div>
           </div>
         </div>
@@ -549,25 +619,31 @@
             <div class="card-body">
               <div class="row g-3">
                 <div class="col-12">
-                  <h6 class="section-label">Server</h6>
+                  <h6 class="section-label">Server
+                    <i class="bi bi-info-circle text-muted" data-bs-toggle="tooltip" data-bs-html="true" title="Remote OpenVLA-OFT inference server. The executor POSTs (image + state + instruction) and receives a chunk of cartesian action deltas.<br>Default host: <code>gpurbr2:7071</code>. Override via <code>VLA_OFT_URL</code> env var or settings.vla.server_url."></i>
+                  </h6>
                   <table class="table table-sm table-borderless info-table mb-0">
-                    <tr><td class="text-muted">URL</td><td id="vla-server-url">--</td></tr>
-                    <tr><td class="text-muted">Status</td><td id="vla-server-status">--</td></tr>
-                    <tr><td class="text-muted">Model</td><td id="vla-server-model">--</td></tr>
+                    <tr data-bs-toggle="tooltip" title="OFT inference server endpoint. Set at container start; settings.vla.server_url persists custom values."><td class="text-muted">URL</td><td id="vla-server-url">--</td></tr>
+                    <tr data-bs-toggle="tooltip" title="Reachability + mode (real/mock). 'unreachable' is expected until the inference server is up."><td class="text-muted">Status</td><td id="vla-server-status">--</td></tr>
+                    <tr data-bs-toggle="tooltip" title="Checkpoint currently loaded on the inference server."><td class="text-muted">Model</td><td id="vla-server-model">--</td></tr>
                   </table>
                 </div>
 
                 <div class="col-md-6">
-                  <h6 class="section-label"><i class="bi bi-record-circle"></i> Record demonstration</h6>
-                  <div class="mb-2">
+                  <h6 class="section-label"><i class="bi bi-record-circle"></i> Record demonstration
+                    <i class="bi bi-info-circle text-muted" data-bs-toggle="tooltip" data-bs-html="true" title="<b>Record a teleoperated demo episode.</b><br>Enters drag mode so you can move the robot by hand, captures synchronized (RGB, EE pose, joints, gripper) at 10 Hz, writes to /data/episodes/&lt;slug&gt;_&lt;ts&gt;/.<br>Use Ctrl-G in drag mode to toggle gripper, or the gripper card."></i>
+                  </h6>
+                  <div class="mb-2" data-bs-toggle="tooltip" data-bs-html="true" title="Natural-language task label. Replicated on every step of the episode and used for fine-tune conditioning.<br>Keep wording consistent across demos of the same task — the model conditions on this string verbatim.">
                     <input type="text" class="form-control form-control-sm" id="vla-record-instruction"
                            placeholder="e.g., pick up the red block">
                   </div>
                   <div class="d-flex gap-2 mb-2">
-                    <button class="btn btn-danger btn-sm flex-grow-1" id="btn-vla-record-start">
+                    <button class="btn btn-danger btn-sm flex-grow-1" id="btn-vla-record-start"
+                            data-bs-toggle="tooltip" title="Enter drag mode and begin recording. Episode directory is created immediately.">
                       <i class="bi bi-record-fill"></i> Start
                     </button>
-                    <button class="btn btn-outline-secondary btn-sm flex-grow-1" id="btn-vla-record-stop" disabled>
+                    <button class="btn btn-outline-secondary btn-sm flex-grow-1" id="btn-vla-record-stop" disabled
+                            data-bs-toggle="tooltip" title="Finalize the episode: write steps.jsonl with per-step actions computed from the state sequence, exit drag mode.">
                       <i class="bi bi-stop-fill"></i> Stop
                     </button>
                   </div>
@@ -575,16 +651,20 @@
                 </div>
 
                 <div class="col-md-6">
-                  <h6 class="section-label"><i class="bi bi-play-circle"></i> Execute</h6>
-                  <div class="mb-2">
+                  <h6 class="section-label"><i class="bi bi-play-circle"></i> Execute
+                    <i class="bi bi-info-circle text-muted" data-bs-toggle="tooltip" data-bs-html="true" title="<b>Run closed-loop VLA inference.</b><br>Captures a frame, POSTs to the OFT server, receives an action chunk, streams absolute poses via ServoP with safety clamps. Rates and chunk size come from settings.vla (default 30 Hz servo, 10 Hz model, 4 chunk actions executed before re-query)."></i>
+                  </h6>
+                  <div class="mb-2" data-bs-toggle="tooltip" data-bs-html="true" title="Task instruction sent to the model. Match the wording used in training demos for best results.">
                     <input type="text" class="form-control form-control-sm" id="vla-execute-instruction"
                            placeholder="Task instruction">
                   </div>
                   <div class="d-flex gap-2 mb-2">
-                    <button class="btn btn-success btn-sm flex-grow-1" id="btn-vla-execute-start">
+                    <button class="btn btn-success btn-sm flex-grow-1" id="btn-vla-execute-start"
+                            data-bs-toggle="tooltip" title="Start closed-loop execution. Workspace bounds from settings.table_plane are enforced on every action.">
                       <i class="bi bi-play-fill"></i> Start
                     </button>
-                    <button class="btn btn-outline-secondary btn-sm flex-grow-1" id="btn-vla-execute-stop" disabled>
+                    <button class="btn btn-outline-secondary btn-sm flex-grow-1" id="btn-vla-execute-stop" disabled
+                            data-bs-toggle="tooltip" title="Halt VLA execution. Robot holds its last commanded pose.">
                       <i class="bi bi-stop-fill"></i> Stop
                     </button>
                   </div>
@@ -619,24 +699,24 @@
             <div class="col-md-4">
               <div class="card">
                 <div class="card-body">
-                  <h6 class="card-title">Tuning</h6>
-                  <div class="mb-2">
+                  <h6 class="card-title">Tuning <i class="bi bi-info-circle text-muted" data-bs-toggle="tooltip" data-bs-html="true" title="All values are live — changes apply on the next servo tick.<br>See VLA.md for the full design."></i></h6>
+                  <div class="mb-2" data-bs-toggle="tooltip" data-bs-html="true" title="<b>Servo loop rate</b> (Hz) — how often we send a ServoP command.<br>30 Hz is the default. Higher = smoother but more CPU and network load.<br>Raise only if overruns stay at 0.">
                     <label class="small">Servo rate (Hz): <span id="srv-rate-val">30</span></label>
                     <input type="range" class="form-range" id="srv-rate" min="5" max="100" step="1" value="30">
                   </div>
-                  <div class="mb-2">
+                  <div class="mb-2" data-bs-toggle="tooltip" data-bs-html="true" title="<b>ServoP t</b> — time budget the firmware uses to interpolate from its current pose to the commanded pose. Not the loop rate.<br>Rule of thumb: keep <code>t</code> at 1.2–2× the servo period (1/rate). Too small = stutter if one tick is late; too large = laggy tracking.<br>Default 0.05 s at 30 Hz.">
                     <label class="small">ServoP t (s): <span id="srv-t-val">0.05</span></label>
                     <input type="range" class="form-range" id="srv-t" min="0.02" max="0.3" step="0.01" value="0.05">
                   </div>
-                  <div class="mb-2">
+                  <div class="mb-2" data-bs-toggle="tooltip" data-bs-html="true" title="<b>gain</b> — proportional (P) term of the firmware's internal PID follower. Higher = more aggressive tracking, more overshoot risk.<br>Range 200–1000. Default 500.<br>Increase for lag; decrease for overshoot.">
                     <label class="small">gain (P): <span id="srv-gain-val">500</span></label>
                     <input type="range" class="form-range" id="srv-gain" min="200" max="1000" step="10" value="500">
                   </div>
-                  <div class="mb-2">
+                  <div class="mb-2" data-bs-toggle="tooltip" data-bs-html="true" title="<b>aheadtime</b> — derivative (D) term of the firmware PID, expressed in ms-scalar form.<br>Damps overshoot. Range 20–100. Default 50.">
                     <label class="small">aheadtime (D): <span id="srv-ahead-val">50</span></label>
                     <input type="range" class="form-range" id="srv-ahead" min="20" max="100" step="1" value="50">
                   </div>
-                  <div class="form-check form-check-sm mt-2">
+                  <div class="form-check form-check-sm mt-2" data-bs-toggle="tooltip" data-bs-html="true" title="<b>CSV logging</b> — records (t, offset, commanded pose, actual pose, servo-call latency) every tick to <code>/data/servo-logs/servo_&lt;timestamp&gt;.csv</code>. Use for offline plotting of step response / frequency tracking.">
                     <input type="checkbox" class="form-check-input" id="srv-csv">
                     <label class="form-check-label small" for="srv-csv">Log CSV to <code>/data/servo-logs/</code></label>
                   </div>
@@ -647,23 +727,26 @@
             <div class="col-md-4">
               <div class="card">
                 <div class="card-body">
-                  <h6 class="card-title">Jog (offset from anchor)</h6>
+                  <h6 class="card-title">Jog (offset from anchor)
+                    <i class="bi bi-info-circle text-muted" data-bs-toggle="tooltip" data-bs-html="true" title="Each slider is an <b>absolute offset from the anchor pose</b> captured when you clicked Start — not an incremental jog from current position.<br>Example: anchor X=400, slider X=+10 → commanded pose X=410. Slider X=0 → pose=anchor.<br>Translational (X/Y/Z) sliders spring back to 0 on release; rotation sliders do not."></i>
+                  </h6>
                   <div class="small text-muted mb-2">
                     Translational sliders spring back to 0 on release.
                   </div>
-                  <div class="mb-1"><label class="small">X: <span id="srv-jog-x-val">0</span> mm</label>
+                  <div class="mb-1" data-bs-toggle="tooltip" title="X offset from anchor (mm). Springs back to 0 on release."><label class="small">X: <span id="srv-jog-x-val">0</span> mm</label>
                     <input type="range" class="form-range srv-jog" data-axis="0" min="-50" max="50" step="1" value="0"></div>
-                  <div class="mb-1"><label class="small">Y: <span id="srv-jog-y-val">0</span> mm</label>
+                  <div class="mb-1" data-bs-toggle="tooltip" title="Y offset from anchor (mm). Springs back to 0 on release."><label class="small">Y: <span id="srv-jog-y-val">0</span> mm</label>
                     <input type="range" class="form-range srv-jog" data-axis="1" min="-50" max="50" step="1" value="0"></div>
-                  <div class="mb-1"><label class="small">Z: <span id="srv-jog-z-val">0</span> mm</label>
+                  <div class="mb-1" data-bs-toggle="tooltip" title="Z offset from anchor (mm). Springs back to 0 on release."><label class="small">Z: <span id="srv-jog-z-val">0</span> mm</label>
                     <input type="range" class="form-range srv-jog" data-axis="2" min="-50" max="50" step="1" value="0"></div>
-                  <div class="mb-1"><label class="small">RX: <span id="srv-jog-rx-val">0</span>°</label>
+                  <div class="mb-1" data-bs-toggle="tooltip" title="Rotation offset about X (°). Does NOT spring back."><label class="small">RX: <span id="srv-jog-rx-val">0</span>°</label>
                     <input type="range" class="form-range srv-jog" data-axis="3" min="-15" max="15" step="0.5" value="0"></div>
-                  <div class="mb-1"><label class="small">RY: <span id="srv-jog-ry-val">0</span>°</label>
+                  <div class="mb-1" data-bs-toggle="tooltip" title="Rotation offset about Y (°). Does NOT spring back."><label class="small">RY: <span id="srv-jog-ry-val">0</span>°</label>
                     <input type="range" class="form-range srv-jog" data-axis="4" min="-15" max="15" step="0.5" value="0"></div>
-                  <div class="mb-1"><label class="small">RZ: <span id="srv-jog-rz-val">0</span>°</label>
+                  <div class="mb-1" data-bs-toggle="tooltip" title="Rotation offset about Z (°). Does NOT spring back."><label class="small">RZ: <span id="srv-jog-rz-val">0</span>°</label>
                     <input type="range" class="form-range srv-jog" data-axis="5" min="-15" max="15" step="0.5" value="0"></div>
-                  <button class="btn btn-sm btn-outline-secondary w-100 mt-2" id="btn-srv-center">
+                  <button class="btn btn-sm btn-outline-secondary w-100 mt-2" id="btn-srv-center"
+                          data-bs-toggle="tooltip" title="Zero every jog slider. Robot returns to anchor pose on the next tick.">
                     Center all jog sliders
                   </button>
                 </div>
@@ -673,14 +756,21 @@
             <div class="col-md-4">
               <div class="card">
                 <div class="card-body">
-                  <h6 class="card-title">Test patterns</h6>
+                  <h6 class="card-title">Test patterns
+                    <i class="bi bi-info-circle text-muted" data-bs-toggle="tooltip" data-bs-html="true" title="Pre-scripted trajectories relative to the anchor. Useful for validating smoothness, bandwidth, and PID tuning.<br>All patterns run until you press Clear or Stop."></i>
+                  </h6>
                   <div class="d-grid gap-2">
-                    <button class="btn btn-sm btn-outline-info" data-pattern="circle">Circle (XY, r=40mm, 4s)</button>
-                    <button class="btn btn-sm btn-outline-info" data-pattern="lissajous">Lissajous (XY)</button>
-                    <button class="btn btn-sm btn-outline-info" data-pattern="square">Square wave (X ±30mm, 4s)</button>
-                    <button class="btn btn-sm btn-outline-info" data-pattern="sine">Sine (X, 30mm, 0.5Hz)</button>
+                    <button class="btn btn-sm btn-outline-info" data-pattern="circle"
+                            data-bs-toggle="tooltip" data-bs-html="true" title="<b>Circle in XY plane</b> centered on anchor.<br>Radius 40 mm, period 4 s. Classic test for smooth closed-path tracking.">Circle (XY, r=40mm, 4s)</button>
+                    <button class="btn btn-sm btn-outline-info" data-pattern="lissajous"
+                            data-bs-toggle="tooltip" data-bs-html="true" title="<b>Lissajous curve</b> in XY: x = 40·sin(0.25·2π·t + 90°), y = 40·sin(0.33·2π·t).<br>Richer than a circle; good for detecting axis cross-coupling.">Lissajous (XY)</button>
+                    <button class="btn btn-sm btn-outline-info" data-pattern="square"
+                            data-bs-toggle="tooltip" data-bs-html="true" title="<b>Square wave on X</b>: anchor ±30 mm, 4 s period.<br>Step input — measures settling time, overshoot, ringing.">Square wave (X ±30mm, 4s)</button>
+                    <button class="btn btn-sm btn-outline-info" data-pattern="sine"
+                            data-bs-toggle="tooltip" data-bs-html="true" title="<b>Sine on X</b>: 30 mm amplitude, 0.5 Hz.<br>Sweep frequency manually to find the rate where tracking breaks down (bandwidth).">Sine (X, 30mm, 0.5Hz)</button>
                   </div>
-                  <button class="btn btn-sm btn-outline-secondary w-100 mt-2" id="btn-srv-clear-pattern">
+                  <button class="btn btn-sm btn-outline-secondary w-100 mt-2" id="btn-srv-clear-pattern"
+                          data-bs-toggle="tooltip" title="Stop the active pattern and return to slider-driven jog mode. Does not halt the tester.">
                     Clear pattern (resume jog)
                   </button>
                 </div>
@@ -691,16 +781,16 @@
               <div class="card">
                 <div class="card-body py-2">
                   <div class="row small g-2">
-                    <div class="col-md-2"><strong>Mode:</strong> <span id="srv-mode">--</span></div>
-                    <div class="col-md-2"><strong>Step:</strong> <span id="srv-step">0</span></div>
-                    <div class="col-md-2"><strong>Latency:</strong> <span id="srv-lat">--</span> ms</div>
-                    <div class="col-md-2"><strong>p50/p95:</strong> <span id="srv-pct">--</span> ms</div>
-                    <div class="col-md-2"><strong>Clamps:</strong> <span id="srv-clamps">0</span></div>
-                    <div class="col-md-2"><strong>Overruns:</strong> <span id="srv-overruns">0</span></div>
+                    <div class="col-md-2" data-bs-toggle="tooltip" data-bs-html="true" title="<b>idle</b>: streaming hold at anchor (no jog, no pattern).<br><b>jog</b>: slider-driven offsets.<br><b>pattern</b>: a test pattern is running."><strong>Mode:</strong> <span id="srv-mode">--</span></div>
+                    <div class="col-md-2" data-bs-toggle="tooltip" title="Number of ServoP commands sent since Start."><strong>Step:</strong> <span id="srv-step">0</span></div>
+                    <div class="col-md-2" data-bs-toggle="tooltip" title="Wall-time of the most recent ServoP service call (ms)."><strong>Latency:</strong> <span id="srv-lat">--</span> ms</div>
+                    <div class="col-md-2" data-bs-toggle="tooltip" data-bs-html="true" title="<b>p50 / p95</b> latency over the last 200 calls (ms).<br>Healthy: p95 &lt; 15 ms.<br>Sustained p95 &gt; 30 ms means the driver or ROS2 DDS is struggling at the current rate."><strong>p50/p95:</strong> <span id="srv-pct">--</span> ms</div>
+                    <div class="col-md-2" data-bs-toggle="tooltip" data-bs-html="true" title="Number of ticks whose commanded pose hit a workspace bound and was clipped.<br>Non-zero means the model/pattern/slider is trying to leave the safe envelope."><strong>Clamps:</strong> <span id="srv-clamps">0</span></div>
+                    <div class="col-md-2" data-bs-toggle="tooltip" data-bs-html="true" title="Ticks that exceeded their budgeted period. Non-zero = the servo rate is too aggressive for this hardware/network. Lower the rate until this stays at 0."><strong>Overruns:</strong> <span id="srv-overruns">0</span></div>
                   </div>
                   <div class="row small g-2 mt-1">
-                    <div class="col-12 text-muted"><strong>Anchor pose:</strong> <span id="srv-anchor">--</span></div>
-                    <div class="col-12 text-muted"><strong>Commanded:</strong> <span id="srv-commanded">--</span></div>
+                    <div class="col-12 text-muted" data-bs-toggle="tooltip" title="Cartesian pose captured the instant you clicked Start. Every jog slider and pattern is relative to this."><strong>Anchor pose:</strong> <span id="srv-anchor">--</span></div>
+                    <div class="col-12 text-muted" data-bs-toggle="tooltip" title="Last cartesian pose we sent to ServoP. Compare against the sidebar's live pose to see tracking error."><strong>Commanded:</strong> <span id="srv-commanded">--</span></div>
                     <div class="col-12"><span id="srv-error" class="text-danger"></span></div>
                   </div>
                 </div>
@@ -709,9 +799,18 @@
 
             <div class="col-12">
               <div class="d-flex gap-2">
-                <button class="btn btn-success" id="btn-srv-start"><i class="bi bi-play-fill"></i> Start</button>
-                <button class="btn btn-secondary" id="btn-srv-stop" disabled><i class="bi bi-stop-fill"></i> Stop</button>
-                <button class="btn btn-danger ms-auto" id="btn-srv-estop"><i class="bi bi-exclamation-octagon-fill"></i> E-STOP</button>
+                <button class="btn btn-success" id="btn-srv-start"
+                        data-bs-toggle="tooltip" data-bs-html="true" title="<b>Start the servo tester.</b><br>Captures the current pose as the anchor and begins streaming ServoP at the configured rate. Sliders and patterns become active.">
+                  <i class="bi bi-play-fill"></i> Start
+                </button>
+                <button class="btn btn-secondary" id="btn-srv-stop" disabled
+                        data-bs-toggle="tooltip" title="Halt the servo tester thread. Robot holds its last commanded pose (does not call ros.stop()).">
+                  <i class="bi bi-stop-fill"></i> Stop
+                </button>
+                <button class="btn btn-danger ms-auto" id="btn-srv-estop"
+                        data-bs-toggle="tooltip" data-bs-html="true" title="<b>Emergency Stop.</b><br>Halts the servo thread AND calls the driver's Stop service to interrupt any active motion. Use this if something looks wrong.">
+                  <i class="bi bi-exclamation-octagon-fill"></i> E-STOP
+                </button>
               </div>
             </div>
           </div>

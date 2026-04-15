@@ -673,14 +673,64 @@ async def add_table_point():
         return {"success": False, "error": str(e)}
 
 
+@app.post("/api/calibration/table/z")
+async def set_table_z():
+    """Record the current wrist Z as the table floor (single-touch calibration).
+
+    This is the simpler, preferred workflow: touch the gripper tip to any point
+    on the (flat, level) table, click once, done. The 4-point / plane-fitting
+    flow is still available in /api/calibration/table/point for rare cases
+    where tilt compensation is needed.
+
+    Stores alongside any existing `points`/`plane` so the two schemas coexist.
+    """
+    try:
+        client = _get_client()
+        pose = client.get_cartesian_pose()
+        wrist_z = float(pose[2])
+        data = json.loads(_TABLE_FILE.read_text()) if _TABLE_FILE.exists() else {}
+        data["table_z"] = wrist_z
+        data.setdefault("min_clearance_mm", 25)
+        _TABLE_FILE.write_text(json.dumps(data, indent=2))
+        return {"success": True, "table_z": wrist_z}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/api/calibration/table/clear")
 async def clear_table():
-    """Clear table plane data."""
+    """Clear table plane data (both single-Z and multi-point schemas)."""
     try:
         _TABLE_FILE.write_text(json.dumps({"points": [], "plane": None}))
         return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def _get_table_z() -> Optional[float]:
+    """Return the effective table Z in wrist coords, from either schema."""
+    try:
+        if not _TABLE_FILE.exists():
+            return None
+        data = json.loads(_TABLE_FILE.read_text())
+        if "table_z" in data:
+            return float(data["table_z"])
+        plane = data.get("plane") or {}
+        mz = plane.get("mean_z")
+        if mz is not None:
+            return float(mz)
+    except Exception:
+        pass
+    return None
+
+
+def _get_min_clearance_mm() -> float:
+    try:
+        if not _TABLE_FILE.exists():
+            return 25.0
+        return float(json.loads(_TABLE_FILE.read_text()).get("min_clearance_mm", 25))
+    except Exception:
+        return 25.0
 
 
 @app.post("/api/calibration/workspace-move")
@@ -747,6 +797,217 @@ async def calibration_depth_at(x: int, y: int):
         return resp
     except Exception as e:
         return {"error": str(e)}
+
+
+# ── Object detection + pick planning ────────────────────────────
+#
+# Proxies the camera server's detection so the browser never talks to the
+# camera server directly (keeps CORS simple and lets us add overlays later).
+# The /api/pick/plan endpoint returns waypoints without moving — callers
+# then call /api/pick/execute to actually run.
+
+@app.get("/api/detection/objects")
+async def detection_objects():
+    """Proxy the camera server's object detection."""
+    import requests
+    try:
+        resp = requests.get(f"{CAMERA_URL}/api/detection/objects", timeout=3).json()
+        return resp
+    except Exception as e:
+        return {"objects": [], "error": str(e)}
+
+
+def _compute_pick_waypoints(
+    robot_x: float, robot_y: float,
+    rotation_deg: float = 0.0,
+    approach_mm: float = 100.0,
+    grasp_clearance_mm: float = 5.0,
+    lift_mm: float = 150.0,
+):
+    """Compute the three waypoints for a pick at (robot_x, robot_y).
+    Z floor comes from the calibrated table_z plus the user's min_clearance_mm
+    so we never drive below the safe height.
+
+    Returns (approach, grasp, retract, table_z, clearance_mm) with each waypoint
+    a 6-D list [X, Y, Z, RX, RY, RZ]. RX/RY are held at current; RZ is the
+    desired gripper rotation.
+    """
+    table_z = _get_table_z()
+    if table_z is None:
+        raise RuntimeError("table Z not calibrated")
+    min_clr = _get_min_clearance_mm()
+
+    grasp_z = table_z + max(grasp_clearance_mm, min_clr)
+    approach_z = grasp_z + approach_mm
+    retract_z = grasp_z + lift_mm
+
+    # Use current RX/RY from the robot so the wrist orientation is preserved.
+    client = _get_client()
+    cur = client.get_cartesian_pose()
+    rx, ry = cur[3], cur[4]
+
+    approach = [robot_x, robot_y, approach_z, rx, ry, rotation_deg]
+    grasp = [robot_x, robot_y, grasp_z, rx, ry, rotation_deg]
+    retract = [robot_x, robot_y, retract_z, rx, ry, rotation_deg]
+
+    return approach, grasp, retract, table_z, min_clr
+
+
+class PickPlanRequest(BaseModel):
+    px: Optional[int] = None
+    py: Optional[int] = None
+    object_id: Optional[int] = None
+    approach_mm: float = 100.0
+    grasp_clearance_mm: float = 5.0
+    lift_mm: float = 150.0
+
+
+@app.post("/api/pick/plan")
+async def pick_plan(req: PickPlanRequest):
+    """Resolve a target (pixel or object id) into robot coordinates and
+    compute the full waypoint plan for preview. Does NOT move the robot.
+
+    Returns waypoints, the resolved camera 3-D, robot 3-D, table Z, and any
+    safety warnings (out-of-bounds, unreachable, etc.)."""
+    import requests
+    try:
+        obj = None
+        camera_xyz = None
+        rotation_deg = 0.0
+
+        if req.object_id is not None:
+            objs = requests.get(f"{CAMERA_URL}/api/detection/objects", timeout=3).json()
+            for o in objs.get("objects", []):
+                if o.get("id") == req.object_id:
+                    obj = o
+                    camera_xyz = o["position_3d"]
+                    rotation_deg = float(o.get("rotation_deg", 0.0))
+                    break
+            if obj is None:
+                return JSONResponse(status_code=404,
+                    content={"success": False, "error": f"object id {req.object_id} not found"})
+        elif req.px is not None and req.py is not None:
+            depth = requests.get(f"{CAMERA_URL}/api/depth/at",
+                params={"x": req.px, "y": req.py}, timeout=3).json()
+            if depth.get("distance", 0) <= 0:
+                return JSONResponse(status_code=400,
+                    content={"success": False, "error": f"no depth at pixel ({req.px}, {req.py})"})
+            camera_xyz = depth["position_3d"]
+        else:
+            return JSONResponse(status_code=400,
+                content={"success": False, "error": "provide object_id or (px, py)"})
+
+        # Transform camera → robot via camera-server calibration.
+        tf_resp = requests.get(
+            f"{CAMERA_URL}/api/calibration/transform",
+            params={"x": camera_xyz[0], "y": camera_xyz[1], "z": camera_xyz[2]},
+            timeout=3,
+        )
+        if tf_resp.status_code != 200:
+            # Camera server returns text/plain for errors; surface that message.
+            msg = tf_resp.text.strip() or f"camera transform failed (HTTP {tf_resp.status_code})"
+            return JSONResponse(status_code=400,
+                content={"success": False, "error": msg})
+        try:
+            tf = tf_resp.json()
+        except Exception:
+            return JSONResponse(status_code=500,
+                content={"success": False, "error": "camera transform returned non-JSON"})
+        if not tf.get("robot_xyz"):
+            return JSONResponse(status_code=400,
+                content={"success": False, "error": "camera calibration not solved or transform failed"})
+        robot_xyz = tf["robot_xyz"]
+
+        approach, grasp, retract, table_z, clearance = _compute_pick_waypoints(
+            robot_x=float(robot_xyz[0]), robot_y=float(robot_xyz[1]),
+            rotation_deg=rotation_deg,
+            approach_mm=req.approach_mm,
+            grasp_clearance_mm=req.grasp_clearance_mm,
+            lift_mm=req.lift_mm,
+        )
+
+        # Safety sanity checks — surface warnings without blocking.
+        warnings = []
+        if grasp[2] < table_z - 1:
+            warnings.append(
+                f"grasp Z {grasp[2]:.1f} is below table_z {table_z:.1f} — would crash gripper"
+            )
+
+        return {
+            "success": True,
+            "target": {
+                "camera_xyz": camera_xyz,
+                "robot_xyz": list(map(float, robot_xyz)),
+                "rotation_deg": rotation_deg,
+                "object": obj,
+            },
+            "table_z": table_z,
+            "min_clearance_mm": clearance,
+            "waypoints": {
+                "approach": approach, "grasp": grasp, "retract": retract,
+            },
+            "warnings": warnings,
+        }
+    except Exception as e:
+        logging.exception("pick plan failed")
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+class PickExecuteRequest(PickPlanRequest):
+    # Execute accepts the same target inputs as plan and re-runs planning
+    # internally so the user's "pick" click always works on the freshest frame.
+    confirm: bool = False
+
+
+@app.post("/api/pick/execute")
+async def pick_execute(req: PickExecuteRequest):
+    """Execute a full pick sequence: approach → grasp → retract.
+    The client must send confirm=true — a safety interlock so an errant POST
+    can't launch the robot."""
+    if not req.confirm:
+        return JSONResponse(status_code=400,
+            content={"success": False, "error": "pass confirm=true to execute"})
+
+    # Re-plan just before executing — no stale waypoints.
+    plan_req = PickPlanRequest(**{k: getattr(req, k) for k in PickPlanRequest.model_fields.keys()})
+    plan_resp = await pick_plan(plan_req)
+    if isinstance(plan_resp, JSONResponse):
+        return plan_resp
+    if not plan_resp.get("success"):
+        return JSONResponse(status_code=400, content=plan_resp)
+
+    try:
+        import time as _time
+        wp = plan_resp["waypoints"]
+        approach, grasp, retract = wp["approach"], wp["grasp"], wp["retract"]
+        client = _get_client()
+
+        logging.info("pick: opening gripper")
+        try:
+            client.gripper_move(800, force=50, speed=50, wait=True)
+        except Exception as e:
+            logging.warning("gripper open failed (continuing): %s", e)
+
+        logging.info("pick: approach %s", approach)
+        client.move_pose(approach)
+
+        logging.info("pick: descend to grasp %s", grasp)
+        client.move_pose(grasp)
+        _time.sleep(0.2)
+
+        logging.info("pick: closing gripper")
+        try:
+            client.gripper_move(200, force=50, speed=50, wait=True)
+        except Exception as e:
+            logging.warning("gripper close failed: %s", e)
+
+        logging.info("pick: retract %s", retract)
+        client.move_pose(retract)
+
+        return {"success": True, "waypoints": wp, "target": plan_resp["target"]}
+    except Exception as e:
+        logging.exception("pick execute failed")
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 
 # ── Camera State ─────────────────────────────────────────────────
