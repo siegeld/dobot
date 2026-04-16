@@ -58,6 +58,22 @@ _state = {
 }
 
 
+# Simple motion command rate limiter: prevent rapid-fire motion requests
+# from queueing up and executing after the user has moved on.
+_last_motion_time = 0.0
+_MOTION_MIN_INTERVAL = 0.15  # seconds between motion commands
+
+
+def _throttle_motion() -> Optional[str]:
+    """Returns an error string if a motion command was sent too recently."""
+    global _last_motion_time
+    now = time.time()
+    if now - _last_motion_time < _MOTION_MIN_INTERVAL:
+        return "motion command too fast — wait before sending another"
+    _last_motion_time = now
+    return None
+
+
 _client_init_lock = threading.Lock()
 
 def _get_client() -> DobotRosClient:
@@ -114,6 +130,17 @@ def _poll_state():
                     _state["robot_mode"] = mode
                     _state["connected"] = not stale
                     _state["error"] = "Robot feedback stale — robot may be offline" if stale else None
+                    # Driver watchdog: signal the driver container to restart
+                    # when the feedback port (30004) goes stale.
+                    if stale:
+                        try:
+                            restart_file = Path("/tmp/dobot-shared/driver_restart")
+                            if not restart_file.exists():
+                                restart_file.parent.mkdir(parents=True, exist_ok=True)
+                                restart_file.touch()
+                                logging.warning("Feedback stale — signaled driver restart via %s", restart_file)
+                        except Exception as wdog_err:
+                            logging.debug("watchdog signal failed: %s", wdog_err)
                     _state["last_update"] = time.time()
                 except Exception as e:
                     _state["connected"] = False
@@ -325,6 +352,9 @@ async def set_speed(req: SpeedRequest):
 async def jog_robot(req: JogRequest):
     """Jog robot by relative distance."""
     try:
+        throttled = _throttle_motion()
+        if throttled:
+            return {"success": False, "error": throttled}
         axis = req.axis.lower()
         if axis not in _VALID_JOG_AXES:
             return {"success": False, "error": f"invalid axis '{req.axis}' — must be one of {sorted(_VALID_JOG_AXES)}"}
@@ -797,11 +827,21 @@ def workspace_move(req: dict):
         # Table Z is in wrist coords (gripper tip touches table at this Z)
         # So wrist target = table_z + height_mm (no gripper offset needed
         # because table was calibrated by touching gripper tip to table)
+        # L-shaped path: move UP first (safe clearance), then XY, then DOWN.
+        # A straight diagonal could pass through the table or obstacles.
         current = client.get_cartesian_pose()
+        safe_z = max(current[2], target_z) + 50.0  # 50mm above the higher of current/target
+        dz_up = safe_z - current[2]
+        if dz_up > 1.0:
+            client.jog(z=dz_up, wait=True, timeout=10.0)
         dx = float(target_xy[0]) - current[0]
         dy = float(target_xy[1]) - current[1]
-        dz = float(target_z) - current[2]
-        client.jog(x=dx, y=dy, z=dz, wait=True, timeout=15.0)
+        if abs(dx) > 0.5 or abs(dy) > 0.5:
+            client.jog(x=dx, y=dy, wait=True, timeout=15.0)
+        current2 = client.get_cartesian_pose()
+        dz_down = target_z - current2[2]
+        if abs(dz_down) > 0.5:
+            client.jog(z=dz_down, wait=True, timeout=10.0)
 
         return {
             "success": True,
@@ -1593,11 +1633,19 @@ _SETTINGS_LEGACY = {
     "camera_view": Path(__file__).parent / "camera_state.json",
 }
 
-_settings_store: Optional[SettingsStore] = SettingsStore(
-    base_dir=_SETTINGS_DIR,
-    defaults=_SETTINGS_DEFAULTS,
-    legacy_files=_SETTINGS_LEGACY,
-)
+# Initialize eagerly but guard against import-time failures so tests
+# that import this module don't crash (the store creates dirs + starts
+# a writer thread, which is fine in the Docker container but may fail
+# in a bare-metal test environment).
+try:
+    _settings_store: Optional[SettingsStore] = SettingsStore(
+        base_dir=_SETTINGS_DIR,
+        defaults=_SETTINGS_DEFAULTS,
+        legacy_files=_SETTINGS_LEGACY,
+    )
+except Exception as _init_err:
+    logging.warning("SettingsStore init failed (will retry on first use): %s", _init_err)
+    _settings_store = None
 
 
 def _settings_load_safety_check():

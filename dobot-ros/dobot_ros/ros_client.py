@@ -557,7 +557,16 @@ class DobotRosClient(Node):
         start_time = time.time()
 
         while time.time() - start_time < timeout:
-            current = self.get_cartesian_pose()
+            try:
+                current = self.get_cartesian_pose()
+            except RuntimeError:
+                # Pose data lost (topic dropped, executor died). Halt robot
+                # and report failure — don't let motion continue unsupervised.
+                try:
+                    self.stop()
+                except Exception:
+                    pass
+                return False
             distance = math.sqrt(
                 (current[0] - target[0])**2 +
                 (current[1] - target[1])**2 +
@@ -625,7 +634,13 @@ class DobotRosClient(Node):
             if abs(offsets[i]) > MAX_JOG_ROT:
                 raise ValueError(f"Jog offset {['RX','RY','RZ'][i-3]}={offsets[i]:.1f}° exceeds ±{MAX_JOG_ROT}°")
         x, y, z, rx, ry, rz = offsets
-        if wait:
+
+        # Capture current pose for wait target. For user-frame jog, the
+        # target is current + offset. For tool-frame jog, the target in the
+        # user frame is unpredictable without FK — so we wait for the robot
+        # mode to leave RUNNING instead of checking position convergence.
+        target = None
+        if wait and self._jog_mode == 'user':
             current_pose = self.get_cartesian_pose()
             target = [
                 current_pose[0] + x,
@@ -655,7 +670,19 @@ class DobotRosClient(Node):
             response = self._call_service(self._rel_mov_user_client, request)
 
         if wait:
-            self.wait_for_cartesian_motion(target, tolerance, timeout)
+            if target is not None:
+                self.wait_for_cartesian_motion(target, tolerance, timeout)
+            else:
+                # Tool-frame: can't predict user-frame target, so wait for
+                # robot mode to leave RUNNING (mode 7).
+                import time as _time
+                start = _time.time()
+                _time.sleep(0.3)  # let the move start
+                while _time.time() - start < timeout:
+                    mode = self.get_robot_mode()
+                    if mode != 7:  # 7 = RUNNING
+                        break
+                    _time.sleep(0.1)
 
         return response.res
 

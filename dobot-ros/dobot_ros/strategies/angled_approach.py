@@ -71,8 +71,11 @@ class AngledApproach(PickStrategy):
             # Move away from the robot base origin (0, 0) to minimize reach issues.
             dx, dy = ctx.robot_x, ctx.robot_y
             norm = math.sqrt(dx * dx + dy * dy)
-            if norm < 1e-6:
+            if norm < 10.0:
                 dx, dy = -1.0, 0.0  # fallback: from the back
+                import logging
+                logging.warning("angled_approach: target near base (%.1f,%.1f), using fallback direction 'from_back'",
+                                ctx.robot_x, ctx.robot_y)
             else:
                 dx, dy = dx / norm, dy / norm
         elif direction == "from_back":

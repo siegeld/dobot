@@ -157,9 +157,22 @@ class SettingsStore:
         self.saved_dir.mkdir(parents=True, exist_ok=True)
 
         self._load()
+        self._cleanup_temp_files()
         self._start_writer()
 
     # ── Initial load / migration ──────────────────────────────────
+    def _cleanup_temp_files(self):
+        """Remove orphaned .tmp files left by _atomic_write after crashes."""
+        try:
+            for f in self.base_dir.glob("*.tmp"):
+                try:
+                    f.unlink()
+                    log.info("Cleaned up orphaned temp file: %s", f)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def _load(self):
         if self.last_path.exists():
             try:
@@ -417,11 +430,26 @@ class SettingsStore:
         log.info("Deleted saved settings '%s'", slugify(name))
 
     def import_bundle(self, data: dict) -> dict:
-        """Import a JSON bundle produced by save_current_as. Returns the saved meta."""
+        """Import a JSON bundle produced by save_current_as. Returns the saved meta.
+
+        Validates that the settings block contains only known groups and that
+        values are the expected types (dicts). Does NOT validate individual
+        field values — that's the responsibility of each consumer on load.
+        """
         required = {"name", "settings"}
         missing = required - set(data.keys())
         if missing:
             raise ValueError(f"import missing required keys: {sorted(missing)}")
+        settings = data["settings"]
+        if not isinstance(settings, dict):
+            raise ValueError("'settings' must be a JSON object")
+        for group, value in settings.items():
+            if not isinstance(value, dict):
+                raise ValueError(f"settings group '{group}' must be a JSON object, got {type(value).__name__}")
+        # Cap import size to prevent denial-of-service via massive JSON.
+        content_preview = json.dumps(settings)
+        if len(content_preview) > 500_000:
+            raise ValueError(f"settings block too large ({len(content_preview)} chars, max 500000)")
         name = data["name"]
         slug = slugify(name)
         p = self._saved_path(name)

@@ -51,11 +51,28 @@ def run_driver(ip: str):
             stderr=sys.stderr,
         )
 
-        # Monitor: check robot reachability every 5s
+        # Monitor: check robot reachability every 5s AND watch for restart signal
+        # from the web dashboard (written when feedback port 30004 goes stale).
+        restart_signal = "/tmp/dobot-shared/driver_restart"
         while proc.poll() is None and not shutting_down:
             time.sleep(5)
             if not check_robot(ip):
                 print("[driver] Robot unreachable — stopping driver")
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                break
+            # Check for restart signal from the web dashboard.
+            import os
+            if os.path.exists(restart_signal):
+                print("[driver] Restart signal detected — restarting driver")
+                try:
+                    os.unlink(restart_signal)
+                except Exception:
+                    pass
                 proc.terminate()
                 try:
                     proc.wait(timeout=5)
