@@ -1074,6 +1074,30 @@ async def vision_status():
     }
 
 
+@app.get("/api/vision/grid")
+async def vision_grid():
+    """Project a table-plane grid into pixel coordinates for overlay visualization.
+    Returns a list of {robot_xy, pixel} pairs that the frontend draws on the canvas.
+    """
+    vt = _get_vision_transform()
+    if vt is None:
+        return {"success": False, "lines": []}
+
+    points = []
+    # Grid from -400 to +400 in X and Y, every 100mm.
+    for x in range(-400, 401, 100):
+        row = []
+        for y in range(-400, 401, 100):
+            try:
+                px, py = vt.robot_to_pixel(float(x), float(y))
+                row.append({"robot": [x, y], "px": [round(px, 1), round(py, 1)]})
+            except Exception:
+                pass
+        if row:
+            points.append(row)
+    return {"success": True, "grid": points, "spacing_mm": 100}
+
+
 @app.post("/api/vision/calibrate")
 async def vision_calibrate():
     """Solve the vision transform from the existing camera-server calibration

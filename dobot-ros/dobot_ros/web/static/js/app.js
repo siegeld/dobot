@@ -1290,10 +1290,14 @@
     if (!btn) return;
 
     btn.addEventListener('shown.bs.tab', () => {
-      // Freshen the camera frame on every tab show.
-      document.getElementById('btn-cal-refresh-feed')?.click();
+      // Freshen the camera frame directly (not via .click() which depends on
+      // the handler being in scope). Also refresh phase indicator + objects.
+      const img = document.getElementById('cal-camera-feed');
+      if (img) {
+        img.src = '/api/calibration/camera-frame?' + Date.now();
+        img.style.display = 'block';
+      }
       calRefreshPhaseIndicator();
-      calStartObjectPolling();
     });
     btn.addEventListener('hidden.bs.tab', () => {
       calStopObjectPolling();
@@ -1561,7 +1565,7 @@
 
   // ── Vision tab ─────────────────────────────────────────────────
 
-  const _visState = { objects: [], target: null, plan: null, pollTimer: null };
+  const _visState = { objects: [], target: null, plan: null, pollTimer: null, grid: null };
 
   function initVisionTab() {
     const btn = document.getElementById('tab-vision-btn');
@@ -1571,14 +1575,15 @@
       visRefreshFeed();
       visRefreshStatus();
       visStartPolling();
+      visFetchGrid();
     });
     btn.addEventListener('hidden.bs.tab', visStopPolling);
 
     document.getElementById('btn-vis-refresh')?.addEventListener('click', () => {
-      visRefreshFeed(); visFetchObjects();
+      visRefreshFeed(); visFetchObjects(); visFetchGrid();
     });
     document.getElementById('vis-show-objects')?.addEventListener('change', visDrawOverlay);
-    document.getElementById('vis-show-grid')?.addEventListener('change', visDrawOverlay);
+    document.getElementById('vis-show-grid')?.addEventListener('change', () => { visFetchGrid(); visDrawOverlay(); });
     document.getElementById('btn-vis-cancel')?.addEventListener('click', () => {
       _visState.target = null; _visState.plan = null;
       visRenderPreview(null); visDrawOverlay();
@@ -1642,6 +1647,15 @@
     } catch (e) {}
   }
 
+  async function visFetchGrid() {
+    if (!document.getElementById('vis-show-grid')?.checked) { _visState.grid = null; return; }
+    try {
+      const d = await fetch('/api/vision/grid').then(r => r.json());
+      _visState.grid = d.success ? d.grid : null;
+      visDrawOverlay();
+    } catch (e) { _visState.grid = null; }
+  }
+
   function visDrawOverlay() {
     const img = document.getElementById('vis-camera-feed');
     const canvas = document.getElementById('vis-overlay');
@@ -1650,6 +1664,41 @@
     canvas.height = img.naturalHeight || 360;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Table-plane grid (projected from robot frame to pixel coords).
+    if (_visState.grid && document.getElementById('vis-show-grid')?.checked) {
+      ctx.strokeStyle = 'rgba(100, 200, 255, 0.3)';
+      ctx.lineWidth = 1;
+      _visState.grid.forEach(row => {
+        if (row.length < 2) return;
+        ctx.beginPath();
+        ctx.moveTo(row[0].px[0], row[0].px[1]);
+        for (let i = 1; i < row.length; i++) ctx.lineTo(row[i].px[0], row[i].px[1]);
+        ctx.stroke();
+      });
+      // Vertical lines (connect same column index across rows).
+      const cols = _visState.grid[0]?.length || 0;
+      for (let c = 0; c < cols; c++) {
+        ctx.beginPath();
+        let started = false;
+        _visState.grid.forEach(row => {
+          if (c < row.length) {
+            if (!started) { ctx.moveTo(row[c].px[0], row[c].px[1]); started = true; }
+            else ctx.lineTo(row[c].px[0], row[c].px[1]);
+          }
+        });
+        ctx.stroke();
+      }
+      // Label the origin (0,0) if visible.
+      const center = _visState.grid.find(row => row.find(p => p.robot[0] === 0 && p.robot[1] === 0));
+      const originPt = center?.find(p => p.robot[0] === 0 && p.robot[1] === 0);
+      if (originPt) {
+        ctx.fillStyle = 'rgba(100, 200, 255, 0.7)';
+        ctx.beginPath(); ctx.arc(originPt.px[0], originPt.px[1], 4, 0, 2*Math.PI); ctx.fill();
+        ctx.font = '11px sans-serif';
+        ctx.fillText('(0,0)', originPt.px[0] + 6, originPt.px[1] - 4);
+      }
+    }
 
     // Object bounding boxes.
     if (document.getElementById('vis-show-objects')?.checked !== false) {
