@@ -167,65 +167,22 @@ class DobotRosClient(Node):
             pass
 
     # ── Value validation (defense-in-depth for robot safety) ────
+    # Delegated to dobot_ros.validation (no ROS deps, testable standalone).
 
     @staticmethod
     def _validate_finite(values: List[float], label: str = "values"):
-        """Reject NaN/Inf before any value reaches the robot controller.
-        This is the last-resort safety net — callers should also validate,
-        but if they don't, this catches it."""
-        for i, v in enumerate(values):
-            if not math.isfinite(v):
-                raise ValueError(
-                    f"{label}[{i}] is {v} — NaN/Inf must never reach the robot"
-                )
+        from dobot_ros.validation import validate_finite
+        validate_finite(values, label)
 
     @staticmethod
     def _validate_pose_bounds(pose: List[float]):
-        """Sanity-check a cartesian pose against hard physical limits.
-        These are deliberately wide — they catch gross errors (off by 10×)
-        without interfering with normal workspace-bounded operations.
-        The robot's own joint limits provide the real constraint."""
-        MAX_XY = 1500.0    # mm — CR5 reach is ~900mm; 1500 catches gross errors
-        MIN_Z = -200.0     # mm — wrist Z should never go far below the base plane
-        MAX_Z = 1500.0     # mm
-        MAX_ROT = 360.0    # deg
-        labels = ["X", "Y", "Z", "RX", "RY", "RZ"]
-        for i in range(2):  # X, Y
-            if abs(pose[i]) > MAX_XY:
-                raise ValueError(
-                    f"Pose {labels[i]}={pose[i]:.1f}mm exceeds hard limit ±{MAX_XY}mm"
-                )
-        if pose[2] < MIN_Z:
-            raise ValueError(
-                f"Pose Z={pose[2]:.1f}mm below hard floor {MIN_Z}mm"
-            )
-        if pose[2] > MAX_Z:
-            raise ValueError(
-                f"Pose Z={pose[2]:.1f}mm exceeds hard ceiling {MAX_Z}mm"
-            )
-        for i in range(3, 6):
-            if abs(pose[i]) > MAX_ROT:
-                raise ValueError(
-                    f"Pose {labels[i]}={pose[i]:.1f}° exceeds hard limit ±{MAX_ROT}°"
-                )
+        from dobot_ros.validation import validate_pose_bounds
+        validate_pose_bounds(pose)
 
     @staticmethod
     def _validate_joint_bounds(joints: List[float]):
-        """Sanity-check joint angles against the CR5's physical limits."""
-        # CR5 joint limits (degrees) — conservative outer bounds.
-        LIMITS = [
-            (-360, 360),   # J1
-            (-360, 360),   # J2
-            (-160, 160),   # J3
-            (-360, 360),   # J4
-            (-360, 360),   # J5
-            (-360, 360),   # J6
-        ]
-        for i, (lo, hi) in enumerate(LIMITS):
-            if joints[i] < lo or joints[i] > hi:
-                raise ValueError(
-                    f"Joint J{i+1}={joints[i]:.1f}° outside limits [{lo}, {hi}]"
-                )
+        from dobot_ros.validation import validate_joint_bounds
+        validate_joint_bounds(joints)
 
     # ── Service helpers ────────────────────────────────────────
 
