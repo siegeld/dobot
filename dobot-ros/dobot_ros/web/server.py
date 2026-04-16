@@ -755,6 +755,10 @@ def _get_min_clearance_mm() -> float:
 def workspace_move(req: dict):
     """Move robot to a workspace position (center or corner) at given height above table."""
     try:
+        blocked = _check_motion_free("workspace_move")
+        if blocked:
+            return {"success": False, "error": blocked}
+
         data = json.loads(_TABLE_FILE.read_text()) if _TABLE_FILE.exists() else {}
         pts = data.get("points", [])
         plane = data.get("plane")
@@ -780,6 +784,8 @@ def workspace_move(req: dict):
         # Compute table Z at this XY using plane equation
         normal = np.array(plane["normal"])
         d = plane["d"]
+        if abs(normal[2]) < 0.01:
+            return {"success": False, "error": "plane normal Z component too small — recalibrate"}
         # ax + by + cz + d = 0 => z = -(ax + by + d) / c
         table_z = -(normal[0] * target_xy[0] + normal[1] * target_xy[1] + d) / normal[2]
         target_z = table_z + height_mm
@@ -989,7 +995,6 @@ def pick_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool s
         return JSONResponse(status_code=400,
             content={"success": False, "error": "pass confirm=true to execute"})
 
-    # Re-plan just before executing — no stale waypoints.
     plan_req = PickPlanRequest(**{k: getattr(req, k) for k in PickPlanRequest.model_fields.keys()})
     plan_resp = pick_plan(plan_req)
     if isinstance(plan_resp, JSONResponse):
@@ -997,11 +1002,12 @@ def pick_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool s
     if not plan_resp.get("success"):
         return JSONResponse(status_code=400, content=plan_resp)
 
+    _set_motion_active("pick")
+    client = _get_client()
     try:
         import time as _time
         wp = plan_resp["waypoints"]
         approach, grasp, retract = wp["approach"], wp["grasp"], wp["retract"]
-        client = _get_client()
 
         logging.info("pick: opening gripper")
         try:
@@ -1011,11 +1017,13 @@ def pick_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool s
 
         logging.info("pick: approach %s", approach)
         client.move_pose(approach)
-        client.wait_for_cartesian_motion(approach, tolerance=3.0, timeout=15.0)
+        if not client.wait_for_cartesian_motion(approach, tolerance=3.0, timeout=15.0):
+            raise RuntimeError("approach timed out — robot may not have arrived")
 
         logging.info("pick: descend to grasp %s", grasp)
         client.move_pose(grasp)
-        client.wait_for_cartesian_motion(grasp, tolerance=3.0, timeout=15.0)
+        if not client.wait_for_cartesian_motion(grasp, tolerance=3.0, timeout=15.0):
+            raise RuntimeError("grasp descent timed out — aborting for safety")
 
         logging.info("pick: closing gripper")
         try:
@@ -1031,6 +1039,13 @@ def pick_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool s
     except Exception as e:
         logging.exception("pick execute failed")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+    finally:
+        # SAFETY: always halt the robot and release the motion lock on exit.
+        try:
+            client.stop()
+        except Exception:
+            pass
+        _set_motion_active(None)
 
 
 # ── Camera State ─────────────────────────────────────────────────
@@ -1413,7 +1428,6 @@ def vision_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool
         return JSONResponse(status_code=400,
             content={"success": False, "error": "pass confirm=true to execute"})
 
-    # Re-plan with vision pipeline.
     plan_req = PickPlanRequest(**{k: getattr(req, k) for k in PickPlanRequest.model_fields.keys()})
     plan_resp = vision_plan(plan_req)
     if isinstance(plan_resp, JSONResponse):
@@ -1421,7 +1435,6 @@ def vision_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool
     if not plan_resp.get("success"):
         return JSONResponse(status_code=400, content=plan_resp)
 
-    # Check confidence — refuse if red.
     conf = plan_resp.get("confidence", {})
     if conf.get("level") == "red":
         return JSONResponse(status_code=409, content={
@@ -1430,20 +1443,19 @@ def vision_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool
             "confidence": conf,
         })
 
+    _set_motion_active("pick")
+    client = _get_client()
     try:
         import time as _time
         wp = plan_resp["waypoints"]
         all_wp = wp.get("all", [])
-        client = _get_client()
 
-        # Set speed if the strategy specified one.
         strategy_slug = plan_resp.get("strategy", {}).get("slug", "simple_top_down")
         params = _strategy_registry.get_params(strategy_slug)
         speed = int(params.get("move_speed", 30))
         force = int(params.get("gripper_force", 50))
         client.set_speed_factor(speed)
 
-        # Execute each waypoint in order.
         for i, step in enumerate(all_wp):
             pose = step["pose"]
             label = step.get("label", f"step {i+1}")
@@ -1451,7 +1463,6 @@ def vision_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool
             gripper_pos = step.get("gripper_pos")
             pause_s = step.get("pause_s", 0)
 
-            # Gripper action BEFORE the move (open before approach).
             if gripper_action == "open" and gripper_pos is not None:
                 logging.info("vision pick [%d/%d] %s: open gripper to %d", i+1, len(all_wp), label, gripper_pos)
                 try:
@@ -1459,16 +1470,14 @@ def vision_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool
                 except Exception as e:
                     logging.warning("gripper open failed: %s", e)
 
-            # Move to waypoint and WAIT for arrival before the next step.
             logging.info("vision pick [%d/%d] %s: move to %s", i+1, len(all_wp), label, pose)
             client.move_pose(pose)
-            client.wait_for_cartesian_motion(pose, tolerance=3.0, timeout=15.0)
+            if not client.wait_for_cartesian_motion(pose, tolerance=3.0, timeout=15.0):
+                raise RuntimeError(f"step {i+1} '{label}' timed out — robot may not have arrived")
 
-            # Pause.
             if pause_s > 0:
                 _time.sleep(pause_s)
 
-            # Gripper action AFTER the move (close at grasp).
             if gripper_action == "close" and gripper_pos is not None:
                 logging.info("vision pick [%d/%d] %s: close gripper to %d", i+1, len(all_wp), label, gripper_pos)
                 try:
@@ -1481,6 +1490,12 @@ def vision_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool
     except Exception as e:
         logging.exception("vision execute failed")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+    finally:
+        try:
+            client.stop()
+        except Exception:
+            pass
+        _set_motion_active(None)
 
 
 # ── Inverse Kinematics (query-only, no motion) ──────────────────
@@ -2067,8 +2082,13 @@ async def ws_state(websocket: WebSocket):
                     7: "RUNNING", 8: "SINGLE_STEP", 9: "ERROR",
                     10: "PAUSE", 11: "COLLISION",
                 }
+                # Staleness guard: if the poll thread died or hung, force
+                # connected=False so the UI doesn't show stale data as live.
+                connected = _state["connected"]
+                if _state["last_update"] > 0 and (time.time() - _state["last_update"]) > 3.0:
+                    connected = False
                 data = {
-                    "connected": _state["connected"],
+                    "connected": connected,
                     "robot_mode": _state["robot_mode"],
                     "robot_mode_name": mode_names.get(_state["robot_mode"], "UNKNOWN"),
                     "joint": _state["joint"],

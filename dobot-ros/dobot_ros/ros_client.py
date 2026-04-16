@@ -568,8 +568,10 @@ class DobotRosClient(Node):
             angle_ok = True
             if len(target) >= 6 and len(current) >= 6:
                 for i in range(3, 6):
-                    # Handle angle wrapping (e.g., 179° vs -179°).
-                    diff = abs(current[i] - target[i])
+                    # Normalize both to [-180, 180] then compare.
+                    c = ((current[i] + 180) % 360) - 180
+                    t = ((target[i] + 180) % 360) - 180
+                    diff = abs(c - t)
                     diff = min(diff, 360.0 - diff)
                     if diff > angle_tolerance:
                         angle_ok = False

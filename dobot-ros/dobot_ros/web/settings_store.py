@@ -93,6 +93,10 @@ def _atomic_write(path: Path, content: str):
         os.replace(tmp.name, str(path))
     except Exception:
         try:
+            tmp.close()  # close fd first so disk space is reclaimable
+        except Exception:
+            pass
+        try:
             os.unlink(tmp.name)
         except Exception:
             pass

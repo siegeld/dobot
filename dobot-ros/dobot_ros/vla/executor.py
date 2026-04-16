@@ -189,7 +189,8 @@ class VLAExecutor:
             jpeg = self.camera.get_jpeg()
             img_b64 = base64.b64encode(jpeg).decode("ascii")
             pose = self.ros.get_cartesian_pose()
-            g_pos = self.ros.gripper_get_position() or 0
+            g_pos = self.ros.gripper_get_position()
+            g_pos = max(0, g_pos) if g_pos is not None and g_pos >= 0 else 0
             state = [*pose, g_pos / 1000.0]
             pred = self.client.predict(
                 image_b64=img_b64,
