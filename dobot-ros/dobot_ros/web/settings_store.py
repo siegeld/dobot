@@ -211,13 +211,17 @@ class SettingsStore:
             self._writer_stop.wait(timeout=0.25)
 
     def _flush(self):
+        # Hold the lock during write for correctness. Releasing early introduces
+        # a race where the writer loop and an explicit flush() can both see
+        # _dirty=False before the file is actually written. The brief blocking
+        # of readers during I/O is acceptable (settings files are small).
         with self._lock:
             if not self._dirty:
                 return
             payload = {
                 "schema_version": SCHEMA_VERSION,
                 "updated_at": _utc_iso(),
-                "settings": self._data,
+                "settings": copy.deepcopy(self._data),
             }
             try:
                 _atomic_write(self.last_path, json.dumps(payload, indent=2))

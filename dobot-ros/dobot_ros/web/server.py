@@ -14,7 +14,7 @@ import time
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -27,6 +27,7 @@ from dobot_ros.config import Config
 from dobot_ros.ros_client import DobotRosClient
 from dobot_ros.web.settings_store import (
     SettingsStore, SettingsBlocked, SettingsNotFound, SettingsConflict, SettingsError,
+    _atomic_write,
 )
 
 
@@ -179,7 +180,7 @@ class SpeedRequest(BaseModel):
     speed: int  # 1-100
 
 class MoveJointsRequest(BaseModel):
-    angles: list  # 6 joint angles
+    angles: List[float]  # 6 joint angles
 
 class ConfigUpdateRequest(BaseModel):
     jog_distance: Optional[float] = None
@@ -477,8 +478,10 @@ async def calibration_record(req: dict = None):
         robot_pose = client.get_cartesian_pose()
         robot_xyz = robot_pose[:3]  # [X, Y, Z] in mm
 
-        px = req.get("px", 320) if req else 320
-        py = req.get("py", 180) if req else 180
+        px = int(req.get("px", 320)) if req else 320
+        py = int(req.get("py", 180)) if req else 180
+        if not (0 <= px <= 1280 and 0 <= py <= 720):
+            return {"success": False, "error": f"pixel ({px}, {py}) out of bounds"}
 
         # Use a small region around the clicked pixel for more robust depth
         patch = 10  # +/- pixels
@@ -645,7 +648,7 @@ async def set_table_clearance(req: dict):
     try:
         data = json.loads(_TABLE_FILE.read_text()) if _TABLE_FILE.exists() else {"points": [], "plane": None}
         data["min_clearance_mm"] = max(0, float(req.get("min_clearance_mm", 25)))
-        _TABLE_FILE.write_text(json.dumps(data, indent=2))
+        _atomic_write(_TABLE_FILE, json.dumps(data, indent=2))
         return {"success": True, "min_clearance_mm": data["min_clearance_mm"]}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -682,7 +685,7 @@ async def add_table_point():
                 "mean_z": float(pts[:, 2].mean()),
             }
 
-        _TABLE_FILE.write_text(json.dumps(data, indent=2))
+        _atomic_write(_TABLE_FILE, json.dumps(data, indent=2))
         return {"success": True, "num_points": len(data["points"]), "point": xyz, "plane": data.get("plane")}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -706,7 +709,7 @@ async def set_table_z():
         data = json.loads(_TABLE_FILE.read_text()) if _TABLE_FILE.exists() else {}
         data["table_z"] = wrist_z
         data.setdefault("min_clearance_mm", 25)
-        _TABLE_FILE.write_text(json.dumps(data, indent=2))
+        _atomic_write(_TABLE_FILE, json.dumps(data, indent=2))
         return {"success": True, "table_z": wrist_z}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -716,7 +719,7 @@ async def set_table_z():
 async def clear_table():
     """Clear table plane data (both single-Z and multi-point schemas)."""
     try:
-        _TABLE_FILE.write_text(json.dumps({"points": [], "plane": None}))
+        _atomic_write(_TABLE_FILE, json.dumps({"points": [], "plane": None}))
         return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -792,7 +795,7 @@ def workspace_move(req: dict):
         dx = float(target_xy[0]) - current[0]
         dy = float(target_xy[1]) - current[1]
         dz = float(target_z) - current[2]
-        client.jog(x=dx, y=dy, z=dz)
+        client.jog(x=dx, y=dy, z=dz, wait=True, timeout=15.0)
 
         return {
             "success": True,
@@ -1483,7 +1486,7 @@ def vision_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool
 # ── Inverse Kinematics (query-only, no motion) ──────────────────
 
 class InverseKinRequest(BaseModel):
-    poses: list  # List of [X, Y, Z, RX, RY, RZ]
+    poses: List[List[float]]  # List of [X, Y, Z, RX, RY, RZ]
 
 
 @app.post("/api/inverse-kin")
@@ -1855,7 +1858,7 @@ async def servo_estop():
 
 
 class ServoTargetRequest(BaseModel):
-    offset: list  # 6-D: [dx, dy, dz, drx, dry, drz]
+    offset: List[float]  # 6-D: [dx, dy, dz, drx, dry, drz]
 
 
 @app.post("/api/servo/target")

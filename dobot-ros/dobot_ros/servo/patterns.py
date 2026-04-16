@@ -127,7 +127,7 @@ def build_pattern(name: str, params: dict) -> Pattern:
     # Clamp XYZ amplitudes/radii.
     for key in ("radius_mm", "amplitude_x_mm", "amplitude_y_mm", "amplitude"):
         if key in params:
-            params[key] = min(float(params[key]), _MAX_XYZ_AMPLITUDE_MM)
+            params[key] = min(abs(float(params[key])), _MAX_XYZ_AMPLITUDE_MM)
 
     # Prevent division by zero in period/frequency.
     if "period_s" in params:

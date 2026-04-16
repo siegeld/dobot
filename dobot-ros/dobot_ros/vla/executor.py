@@ -92,6 +92,8 @@ class VLAExecutor:
         self._lock = threading.Lock()
         self._status = ExecutorStatus()
         self._last_gripper_norm: Optional[float] = None
+        self._last_gripper_time: float = 0.0
+        self._gripper_debounce_s: float = 0.5  # min seconds between gripper commands
 
     # ── Lifecycle ───────────────────────────────────────────────
     def is_running(self) -> bool:
@@ -270,11 +272,14 @@ class VLAExecutor:
         # Gripper (fire-and-forget; only if threshold crossed).
         if gripper is not None:
             last = self._last_gripper_norm
-            if last is None or abs(gripper - last) >= self.config.gripper_threshold:
+            now = time.time()
+            debounce_ok = (now - self._last_gripper_time) >= self._gripper_debounce_s
+            if debounce_ok and (last is None or abs(gripper - last) >= self.config.gripper_threshold):
                 target = int(max(0, min(1000, round(gripper * 1000))))
                 try:
                     self.ros.gripper_move(target, wait=False)
                     self._last_gripper_norm = gripper
+                    self._last_gripper_time = now
                 except Exception as e:
                     log.warning("gripper_move failed: %s", e)
 

@@ -176,12 +176,27 @@ class ServoTester:
             self._status.pattern_name = None
         return self.status()
 
+    _CONFIG_TYPES = {
+        "servo_rate_hz": float, "t": float,
+        "aheadtime": float, "gain": float,
+        "idle_timeout_s": (float, type(None)),
+    }
+
     def update_config(self, **kwargs) -> ServoStatus:
-        """Update tuning parameters live. Only known fields are applied."""
+        """Update tuning parameters live. Validates types and field names."""
         with self._lock:
             for k, v in kwargs.items():
-                if hasattr(self.config, k):
-                    setattr(self.config, k, v)
+                if k not in self._CONFIG_TYPES:
+                    continue
+                expected = self._CONFIG_TYPES[k]
+                try:
+                    if expected is float:
+                        v = float(v)
+                    elif isinstance(expected, tuple) and type(None) in expected:
+                        v = float(v) if v is not None else None
+                except (TypeError, ValueError):
+                    continue
+                setattr(self.config, k, v)
         return self.status()
 
     def status(self) -> ServoStatus:
@@ -312,6 +327,8 @@ class ServoTester:
         except Exception as e:
             log.warning("open csv log failed: %s", e)
             self._csv_file = None
+            with self._lock:
+                self._status.last_error = f"CSV log failed to open: {e}"
 
     def _close_csv(self):
         if self._csv_file is not None:

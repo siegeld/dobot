@@ -310,10 +310,13 @@ class DobotRosClient(Node):
             return list(self._cartesian_pose)
 
     def get_position(self) -> Position:
-        """Get current robot position (joint and cartesian)."""
-        joint = self.get_joint_angles()
-        cartesian = self.get_cartesian_pose()
-        return Position(joint=joint, cartesian=cartesian)
+        """Get current robot position (joint and cartesian) from a single lock acquisition."""
+        with self._state_lock:
+            if self._joint_angles is None:
+                raise RuntimeError("No joint data received yet")
+            if self._cartesian_pose is None:
+                raise RuntimeError("No cartesian data received yet")
+            return Position(joint=list(self._joint_angles), cartesian=list(self._cartesian_pose))
 
     # ── Robot commands ─────────────────────────────────────────
 
@@ -434,14 +437,11 @@ class DobotRosClient(Node):
         request.f = float(pose[5])
         # Optional tuning params are passed as key=value strings per the
         # Dobot TCP-IP protocol convention.
-        params = []
-        if t != -1:
-            params.append(f"t={t:f}")
-        if aheadtime != -1:
-            params.append(f"aheadtime={aheadtime:f}")
-        if gain != -1:
-            params.append(f"gain={gain:f}")
-        request.param_value = params
+        request.param_value = [
+            f"t={t:f}",
+            f"aheadtime={aheadtime:f}",
+            f"gain={gain:f}",
+        ]
         response = self._call_service(self._servo_p_client, request)
         return response.res
 
@@ -465,14 +465,11 @@ class DobotRosClient(Node):
         request.d = float(joints[3])
         request.e = float(joints[4])
         request.f = float(joints[5])
-        params = []
-        if t != -1:
-            params.append(f"t={t:f}")
-        if aheadtime != -1:
-            params.append(f"aheadtime={aheadtime:f}")
-        if gain != -1:
-            params.append(f"gain={gain:f}")
-        request.param_value = params
+        request.param_value = [
+            f"t={t:f}",
+            f"aheadtime={aheadtime:f}",
+            f"gain={gain:f}",
+        ]
         response = self._call_service(self._servo_j_client, request)
         return response.res
 

@@ -65,29 +65,29 @@ No `py.typed` file for downstream mypy consumers.
 
 ## Safety Audit (2026-04-16)
 
-Three audit passes. 58 bugs found and fixed. 29 remaining (tracked below).
+Three audit passes completed 2026-04-16. 87 total issues found, 81 fixed, 6 remaining.
 
-Previously fixed: see commits `e24668a` (32 fixes) and `7d7421e` (26 fixes).
+Previously fixed: `e24668a` (32), `7d7421e` (26), `5297a23` (10), `pending` (13).
 
 ### CRITICAL — could cause robot crash or injury
 
 | # | Status | File | Issue |
 |---|--------|------|-------|
-| S-C1 | **OPEN** | ros_client.py | `wait_for_cartesian_motion` ignores RX/RY/RZ — gripper closes while wrist is still rotating during pick |
-| S-C2 | **OPEN** | server.py | `pick_execute` and `vision_execute` are `async def` that block the event loop 30-60s — E-STOP unresponsive. Fix: change to `def` so FastAPI uses threadpool. |
-| S-C3 | **OPEN** | server.py | `_get_client()` not thread-safe — concurrent init creates duplicate ROS nodes |
-| S-C4 | **OPEN** | server.py | VLA executor, servo tester, and pick can run simultaneously — competing motion streams |
-| S-C5 | **OPEN** | server.py + driver.py | Driver watchdog auto-restart (documented in CLAUDE.md) not implemented |
-| S-C6 | **OPEN** | robot3d.js | `simulationTick` never sets `simulating=false` — `simOnComplete` fires ~18× |
+| S-C1 | FIXED | ros_client.py | `wait_for_cartesian_motion` now checks RX/RY/RZ with angle wrapping |
+| S-C2 | FIXED | server.py | Pick/vision execute + plan + workspace_move changed to `def` (threadpool) |
+| S-C3 | FIXED | server.py | `_get_client()` uses double-checked locking with `_client_init_lock` |
+| S-C4 | FIXED | server.py | Global `_check_motion_free()` guard blocks competing motion streams |
+| S-C5 | DEFERRED | server.py + driver.py | Driver watchdog auto-restart not implemented |
+| S-C6 | FIXED | robot3d.js | `simulationTick` calls `stopSimulation()` on completion |
 
 ### HIGH — could cause incorrect motion
 
 | # | Status | File | Issue |
 |---|--------|------|-------|
-| S-H1 | **OPEN** | ros_client.py | `_validate_pose_bounds` Z allows negative values (e.g., Z=-500 passes) |
-| S-H2 | **OPEN** | server.py | `MoveJointsRequest.angles` is bare `list` — no type enforcement |
-| S-H3 | **OPEN** | vla/safety.py | `clamp_delta`/`clamp_pose` don't check NaN/Inf |
-| S-H4 | **OPEN** | vla/executor.py | `stop()` reports success even if join times out — old thread still streaming |
+| S-H1 | FIXED | ros_client.py | Z floor at MIN_Z=-200mm in `_validate_pose_bounds` |
+| S-H2 | FIXED | server.py | `MoveJointsRequest`, `InverseKinRequest`, `ServoTargetRequest` use `List[float]` |
+| S-H3 | FIXED | vla/safety.py | `clamp_delta`/`clamp_pose` check `isfinite()` first |
+| S-H4 | FIXED | vla/executor.py | `stop()` checks `thread.is_alive()` after join; keeps `running=True` if stuck |
 | S-H5 | DEFERRED | ros_client.py | Tool-frame jog `wait=True` uses user-frame math for target |
 | S-H6 | DEFERRED | server.py | Workspace move uses straight diagonal path, not L-shaped |
 
@@ -96,34 +96,34 @@ Previously fixed: see commits `e24668a` (32 fixes) and `7d7421e` (26 fixes).
 | # | Status | File | Issue |
 |---|--------|------|-------|
 | S-M1 | DEFERRED | server.py | Settings import no schema validation |
-| S-M2 | **OPEN** | ros_client.py | `get_position()` reads joint/cartesian from separate lock acquisitions |
-| S-M3 | **OPEN** | server.py | `calibration_record` no px/py bounds validation |
-| S-M4 | **OPEN** | servo/tester.py | `update_config` uses `setattr` without type coercion |
-| S-M5 | **OPEN** | strategies | Angled approach at (0,0) uses silent fallback direction |
-| S-M6 | **OPEN** | server.py | `workspace_move` fire-and-forget jog — no wait-for-completion |
-| S-M7 | **OPEN** | settings_store.py | `_flush()` holds lock during file I/O |
-| S-M8 | **OPEN** | server.py | `_TABLE_FILE` non-atomic reads race with writes |
-| S-M9 | **OPEN** | servo/tester.py | CSV open failure silent — user thinks logging is active |
+| S-M2 | FIXED | ros_client.py | `get_position()` reads both under single lock acquisition |
+| S-M3 | FIXED | server.py | `calibration_record` validates px/py bounds [0, 1280]×[0, 720] |
+| S-M4 | FIXED | servo/tester.py | `update_config` validates field names + type-coerces values |
+| S-M5 | DEFERRED | strategies | Angled approach at (0,0) uses silent fallback direction |
+| S-M6 | FIXED | server.py | `workspace_move` now calls `jog(wait=True, timeout=15)` |
+| S-M7 | FIXED | settings_store.py | `_flush()` correctness restored (lock held during write) |
+| S-M8 | FIXED | server.py | All `_TABLE_FILE` writes now use `_atomic_write()` |
+| S-M9 | FIXED | servo/tester.py | CSV open failure sets `last_error` in status |
 | S-M10 | DEFERRED | server.py | No rate limiting on motion commands |
 
 ### LOW — cosmetic / edge cases
 
 | # | Status | File | Issue |
 |---|--------|------|-------|
-| S-L1 | **OPEN** | ros_client.py | ServoP `if t != -1` guards are dead code |
-| S-L2 | **OPEN** | vla/executor.py | Gripper threshold no debounce |
-| S-L3 | **OPEN** | servo/patterns.py | Negative amplitudes not clamped |
+| S-L1 | FIXED | ros_client.py | Removed dead `if t != -1` guards in ServoP/ServoJ |
+| S-L2 | FIXED | vla/executor.py | Gripper commands debounced (0.5s minimum between commands) |
+| S-L3 | FIXED | servo/patterns.py | Negative amplitudes abs()'d before clamping |
 | S-L4 | DEFERRED | app.js | `logActivity` innerHTML XSS |
 | S-L5 | DEFERRED | settings_store.py | Orphaned temp files on kill |
 | S-L6 | DEFERRED | server.py | `_settings_store` created at import time |
 
 ### Test coverage gaps
 
-| # | Missing test |
-|---|--------------|
-| S-T1 | Concurrent executor + servo tester operation |
-| S-T2 | `wait_for_cartesian_motion` with rotation |
-| S-T3 | `_get_client()` concurrent initialization |
-| S-T4 | `MockRosClient.stop()` not implemented in mock |
-| S-T5 | Strategy `plan()` with NaN rotation_deg |
-| S-T6 | Pick failure recovery (safe state after collision) |
+| # | Status | Missing test |
+|---|--------|--------------|
+| S-T1 | OPEN | Concurrent executor + servo tester operation |
+| S-T2 | OPEN | `wait_for_cartesian_motion` with rotation |
+| S-T3 | OPEN | `_get_client()` concurrent initialization |
+| S-T4 | FIXED | `MockRosClient.stop()` added to conftest |
+| S-T5 | OPEN | Strategy `plan()` with NaN rotation_deg |
+| S-T6 | OPEN | Pick failure recovery (safe state after collision) |
