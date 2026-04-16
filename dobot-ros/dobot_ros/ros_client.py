@@ -26,6 +26,7 @@ from dobot_msgs_v4.srv import (
     EnableRobot,
     DisableRobot,
     ClearError,
+    InverseKin,
     MovJ,
     RelMovLUser,
     RelMovLTool,
@@ -126,6 +127,8 @@ class DobotRosClient(Node):
             StartDrag, f'{self._srv_prefix}StartDrag')
         self._stop_drag_client = self.create_client(
             StopDrag, f'{self._srv_prefix}StopDrag')
+        self._inverse_kin_client = self.create_client(
+            InverseKin, f'{self._srv_prefix}InverseKin')
         self._servo_p_client = self.create_client(
             ServoP, f'{self._srv_prefix}ServoP')
         self._servo_j_client = self.create_client(
@@ -297,6 +300,46 @@ class DobotRosClient(Node):
         request.ratio = speed
         response = self._call_service(self._speed_factor_client, request)
         return response.res
+
+    def inverse_kin(self, pose: List[float]) -> List[float]:
+        """Compute inverse kinematics for a cartesian pose without moving.
+
+        Takes [X, Y, Z, RX, RY, RZ] (mm, degrees).
+        Returns [J1, J2, J3, J4, J5, J6] (degrees).
+        The robot solves IK internally using its current joint angles to
+        select the nearest solution. Pure query — no motion.
+        """
+        if len(pose) != 6:
+            raise ValueError("Must provide [X, Y, Z, RX, RY, RZ]")
+        request = InverseKin.Request()
+        request.x = float(pose[0])
+        request.y = float(pose[1])
+        request.z = float(pose[2])
+        request.rx = float(pose[3])
+        request.ry = float(pose[4])
+        request.rz = float(pose[5])
+        request.use_joint_near = ""
+        request.joint_near = ""
+        request.user = ""
+        request.tool = ""
+        response = self._call_service(self._inverse_kin_client, request)
+
+        # robot_return is a comma-separated string like "{j1,j2,j3,j4,j5,j6}"
+        # res=0 means success; non-zero means the robot rejected the query.
+        import re
+        ret = response.robot_return or ''
+        if response.res != 0 or not ret:
+            raise RuntimeError(
+                f"InverseKin failed: res={response.res}, return={ret!r}. "
+                f"Robot may need to be enabled (mode 5) before IK queries work."
+            )
+        match = re.search(r'\{([^}]+)\}', ret)
+        if not match:
+            raise RuntimeError(f"InverseKin returned unexpected format: {ret!r}")
+        angles = [float(v) for v in match.group(1).split(',')]
+        if len(angles) != 6:
+            raise RuntimeError(f"InverseKin returned {len(angles)} values, expected 6")
+        return angles
 
     def servo_p(
         self,

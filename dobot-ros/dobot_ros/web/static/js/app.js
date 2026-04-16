@@ -225,9 +225,12 @@
       $('#info-mode').textContent = data.robot_mode_name + ' (ERR)';
     }
 
-    // Drive 3D visualization
+    // Drive 3D visualization (joints + gripper)
     if (window.updateRobotJoints && data.joint) {
       window.updateRobotJoints(data.joint);
+    }
+    if (window.updateRobotGripper && data.gripper_position >= 0) {
+      window.updateRobotGripper(data.gripper_position);
     }
   }
 

@@ -38,6 +38,29 @@ let jointPivots = [];   // 6 Group objects — rotation.z drives each joint
 let robotRoot;
 let animationId;
 
+// Gripper state
+let gripperGroup = null;     // Group attached after Link6
+let gripperFingerL = null;
+let gripperFingerR = null;
+let gripperTargetSpread = 0; // 0..0.0525 (half of 105mm max stroke, in meters)
+let gripperCurrentSpread = 0;
+
+// Simulation state
+let simulating = false;
+let simSteps = [];
+let simIndex = 0;
+let simStartTime = 0;
+let simStepDuration = 1.0;  // seconds per step
+let simGhostRoot = null;     // transparent clone of robot for "current real pose"
+let simGhostPivots = [];
+let simGhostGripperL = null;
+let simGhostGripperR = null;
+let simOnComplete = null;
+let simBadge = null;
+let simLabel = null;
+let simLiveFrozenJoints = null;
+let simLiveFrozenGripper = 0;
+
 function init() {
   const container = document.getElementById('robot-3d-container');
   if (!container) return;
@@ -95,6 +118,7 @@ function init() {
 
   loadRobot();
   loadSavedCamera();
+  createSimBadge(container);
 
   // Resize handling
   const ro = new ResizeObserver(() => onResize(container));
@@ -168,17 +192,51 @@ function loadRobot() {
       pivot.add(wrap);
     });
 
+    // After the last link, attach the gripper.
+    if (i === LINK_FILES.length - 1) {
+      buildGripper(pivot);
+    }
+
     parent = pivot;
   });
 }
 
 function updateJoints(anglesDeg) {
   if (!anglesDeg || anglesDeg.length < 6) return;
+  // During simulation the live feed drives the ghost, not the main robot.
+  if (simulating) {
+    simLiveFrozenJoints = anglesDeg.slice();
+    updateGhostJoints(anglesDeg);
+    return;
+  }
   for (let i = 0; i < 6; i++) {
     if (jointPivots[i]) {
       jointPivots[i].rotation.z = anglesDeg[i] * (Math.PI / 180);
     }
   }
+}
+
+function setJointsDirect(anglesDeg) {
+  // Set main robot joints directly (used by simulation, bypasses live-guard).
+  for (let i = 0; i < 6; i++) {
+    if (jointPivots[i]) {
+      jointPivots[i].rotation.z = anglesDeg[i] * (Math.PI / 180);
+    }
+  }
+}
+
+function updateGripperPosition(pos01) {
+  // pos01: 0 = closed, 1 = fully open (maps to 0-52.5mm half-stroke each side)
+  gripperTargetSpread = pos01 * 0.0525;
+}
+
+function updateGripper(pos0to1000) {
+  // From WebSocket gripper_position (0-1000).
+  if (simulating) {
+    simLiveFrozenGripper = pos0to1000;
+    return;
+  }
+  updateGripperPosition(pos0to1000 / 1000.0);
 }
 
 function getCameraState() {
@@ -239,9 +297,217 @@ function onResize(container) {
   renderer.setSize(w, h);
 }
 
+// (old animate/bootstrap removed — enhanced versions are below)
+
+// ── Gripper geometry ────────────────────────────────────────────
+// AG-105: 105mm stroke (0 closed → 105mm open). Flange-to-tip ~203mm.
+// Procedural: mount block + two finger pads that translate ±X.
+
+function buildGripper(parent) {
+  gripperGroup = new THREE.Group();
+  // Offset from flange along local Z (URDF Z, which is the tool axis).
+  // In the URDF chain's local frame after joint6, +Z points out the flange.
+  gripperGroup.position.set(0, 0, 0.06); // mount surface offset
+
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: 0x3a3a40, metalness: 0.5, roughness: 0.4,
+  });
+  const fingerMat = new THREE.MeshStandardMaterial({
+    color: 0x5a5a64, metalness: 0.4, roughness: 0.35,
+  });
+
+  // Gripper body (housing)
+  const bodyGeo = new THREE.BoxGeometry(0.06, 0.04, 0.10);
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.set(0, 0, 0.05);
+  gripperGroup.add(body);
+
+  // Left finger
+  const fingerGeo = new THREE.BoxGeometry(0.012, 0.025, 0.07);
+  gripperFingerL = new THREE.Mesh(fingerGeo, fingerMat);
+  gripperFingerL.position.set(-0.005, 0, 0.135);
+  gripperGroup.add(gripperFingerL);
+
+  // Right finger
+  gripperFingerR = new THREE.Mesh(fingerGeo, fingerMat);
+  gripperFingerR.position.set(0.005, 0, 0.135);
+  gripperGroup.add(gripperFingerR);
+
+  parent.add(gripperGroup);
+}
+
+function animateGripperFingers() {
+  if (!gripperFingerL || !gripperFingerR) return;
+  // Lerp toward target spread for smooth animation.
+  gripperCurrentSpread += (gripperTargetSpread - gripperCurrentSpread) * 0.15;
+  gripperFingerL.position.x = -0.005 - gripperCurrentSpread;
+  gripperFingerR.position.x = 0.005 + gripperCurrentSpread;
+}
+
+
+// ── Simulation mode ─────────────────────────────────────────────
+
+function createSimBadge(container) {
+  simBadge = document.createElement('div');
+  simBadge.style.cssText =
+    'position:absolute; top:8px; left:8px; z-index:10; display:none; ' +
+    'background:rgba(255,165,0,0.85); color:#000; font-weight:700; ' +
+    'padding:3px 10px; border-radius:4px; font-size:13px; pointer-events:none;';
+  simBadge.textContent = 'SIMULATION';
+  container.style.position = 'relative';
+  container.appendChild(simBadge);
+
+  simLabel = document.createElement('div');
+  simLabel.style.cssText =
+    'position:absolute; bottom:8px; left:8px; z-index:10; display:none; ' +
+    'background:rgba(0,0,0,0.7); color:#fff; padding:2px 8px; ' +
+    'border-radius:4px; font-size:12px; pointer-events:none;';
+  container.appendChild(simLabel);
+}
+
+function buildGhostRobot() {
+  // Clone the kinematic chain as a transparent "ghost" showing the real pose.
+  if (simGhostRoot) { robotRoot.parent.remove(simGhostRoot); }
+  simGhostRoot = robotRoot.clone(true);
+  simGhostPivots = [];
+
+  // Make all meshes transparent.
+  simGhostRoot.traverse((child) => {
+    if (child.isMesh) {
+      child.material = child.material.clone();
+      child.material.transparent = true;
+      child.material.opacity = 0.25;
+      child.material.depthWrite = false;
+    }
+  });
+
+  // Find the pivots in the cloned tree (same order as original).
+  // The structure is: robotRoot > jointGroup > pivot > ... repeated.
+  // We walk depth-first and collect Groups that are children of Groups
+  // and have children of their own — same pattern as the original build.
+  function collectPivots(node, depth, acc) {
+    // jointGroup is at even depth, pivot at odd depth in the chain.
+    node.children.forEach(child => {
+      if (child.isGroup) {
+        // Heuristic: pivot has rotation capability; jointGroup has position offset.
+        // In the original, jointPivots are at indices 0,1,2,3,4,5.
+        if (depth % 2 === 1 && acc.length < 6) {
+          acc.push(child);
+        }
+        collectPivots(child, depth + 1, acc);
+      }
+    });
+    return acc;
+  }
+  simGhostPivots = collectPivots(simGhostRoot, 0, []);
+
+  robotRoot.parent.add(simGhostRoot);
+}
+
+function updateGhostJoints(anglesDeg) {
+  if (!simGhostPivots.length) return;
+  for (let i = 0; i < 6 && i < simGhostPivots.length; i++) {
+    simGhostPivots[i].rotation.z = anglesDeg[i] * (Math.PI / 180);
+  }
+}
+
+function removeGhost() {
+  if (simGhostRoot && simGhostRoot.parent) {
+    simGhostRoot.parent.remove(simGhostRoot);
+  }
+  simGhostRoot = null;
+  simGhostPivots = [];
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+function lerpArray(a, b, t) { return a.map((v, i) => lerp(v, b[i] || v, t)); }
+
+function simulationTick() {
+  if (!simulating || simSteps.length === 0) return;
+
+  const elapsed = (performance.now() / 1000) - simStartTime;
+  const totalDur = simSteps.length * simStepDuration;
+
+  if (elapsed >= totalDur) {
+    // Simulation complete — show final pose, call callback.
+    const last = simSteps[simSteps.length - 1];
+    setJointsDirect(last.joints);
+    updateGripperPosition((last.gripper_pos || 0) / 1000.0);
+    if (simLabel) simLabel.textContent = `Step ${simSteps.length}/${simSteps.length}: ${last.label || 'done'}`;
+    if (simOnComplete) setTimeout(simOnComplete, 300);
+    return;
+  }
+
+  // Find current step and interpolation fraction within it.
+  const rawIdx = elapsed / simStepDuration;
+  const idx = Math.min(Math.floor(rawIdx), simSteps.length - 1);
+  const frac = rawIdx - idx;
+
+  const cur = simSteps[idx];
+  const next = simSteps[Math.min(idx + 1, simSteps.length - 1)];
+
+  const interpJoints = lerpArray(cur.joints, next.joints, Math.min(frac, 1.0));
+  setJointsDirect(interpJoints);
+
+  const interpGripper = lerp(cur.gripper_pos || 0, next.gripper_pos || 0, Math.min(frac, 1.0));
+  updateGripperPosition(interpGripper / 1000.0);
+
+  if (simLabel) {
+    simLabel.textContent = `Step ${idx + 1}/${simSteps.length}: ${cur.label || ''}`;
+    simLabel.style.display = '';
+  }
+}
+
+/**
+ * Start motion simulation in the 3D view.
+ * @param {Array} steps — [{joints: [J1..J6], gripper_pos: 0-1000, label: "approach"}, ...]
+ * @param {Object} opts — {stepDuration: 1.0, onComplete: fn}
+ */
+function startSimulation(steps, opts = {}) {
+  if (!steps || steps.length === 0) return;
+  simSteps = steps;
+  simStepDuration = opts.stepDuration || 1.0;
+  simOnComplete = opts.onComplete || null;
+
+  // Freeze the current live pose for the ghost.
+  simLiveFrozenJoints = [];
+  for (let i = 0; i < 6; i++) {
+    simLiveFrozenJoints.push(
+      jointPivots[i] ? jointPivots[i].rotation.z * (180 / Math.PI) : 0
+    );
+  }
+  simLiveFrozenGripper = gripperCurrentSpread / 0.0525 * 1000;
+
+  buildGhostRobot();
+  updateGhostJoints(simLiveFrozenJoints);
+
+  simStartTime = performance.now() / 1000;
+  simulating = true;
+
+  if (simBadge) simBadge.style.display = '';
+  if (simLabel) simLabel.style.display = '';
+
+  // Set main robot to first step immediately.
+  setJointsDirect(steps[0].joints);
+  updateGripperPosition((steps[0].gripper_pos || 0) / 1000.0);
+}
+
+function stopSimulation() {
+  simulating = false;
+  removeGhost();
+  if (simBadge) simBadge.style.display = 'none';
+  if (simLabel) simLabel.style.display = 'none';
+  simSteps = [];
+  // Reconnect to live — next updateJoints call from WebSocket will drive the robot.
+}
+
+// ── Animate loop (enhanced with gripper + simulation) ───────────
+
 function animate() {
   animationId = requestAnimationFrame(animate);
   if (controls) controls.update();
+  animateGripperFingers();
+  if (simulating) simulationTick();
   if (renderer && scene && camera) renderer.render(scene, camera);
 }
 
@@ -255,5 +521,8 @@ if (document.readyState === 'loading') {
 
 // Expose to non-module app.js
 window.updateRobotJoints = updateJoints;
+window.updateRobotGripper = updateGripper;
 window.resetRobotCamera = resetCamera;
 window.saveRobotCamera = saveCamera;
+window.simulateRobotMotion = startSimulation;
+window.stopRobotSimulation = stopSimulation;

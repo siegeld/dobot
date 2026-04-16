@@ -1040,6 +1040,34 @@ async def save_camera(request: dict):
         return {"success": False, "error": str(e)}
 
 
+# ── Inverse Kinematics (query-only, no motion) ──────────────────
+
+class InverseKinRequest(BaseModel):
+    poses: list  # List of [X, Y, Z, RX, RY, RZ]
+
+
+@app.post("/api/inverse-kin")
+async def inverse_kin(req: InverseKinRequest):
+    """Compute joint angles for one or more cartesian poses using the robot's
+    own IK solver. Pure query — the robot does NOT move.
+
+    Used by the 3D simulation mode to animate the planned trajectory.
+    """
+    try:
+        client = _get_client()
+        results = []
+        for pose in req.poses:
+            if len(pose) != 6:
+                return JSONResponse(status_code=400,
+                    content={"success": False, "error": f"each pose must be 6-D, got {len(pose)}"})
+            joints = client.inverse_kin(pose)
+            results.append(joints)
+        return {"success": True, "joints": results}
+    except Exception as e:
+        logging.exception("inverse-kin failed")
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
 # ── VLA (Vision-Language-Action) ─────────────────────────────────
 #
 # Recorder + executor live in dobot_ros.vla. The web layer owns singleton
