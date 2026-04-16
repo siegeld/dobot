@@ -588,6 +588,18 @@ class DobotRosClient(Node):
         timeout: float = 30.0,
     ) -> int:
         """Jog in cartesian space."""
+        offsets = [float(x), float(y), float(z), float(rx), float(ry), float(rz)]
+        self._validate_finite(offsets, "jog offsets")
+        # Cap single-jog magnitude to prevent gross errors from UI bugs.
+        MAX_JOG_LINEAR = 500.0   # mm
+        MAX_JOG_ROT = 180.0      # deg
+        for i in range(3):
+            if abs(offsets[i]) > MAX_JOG_LINEAR:
+                raise ValueError(f"Jog offset {['X','Y','Z'][i]}={offsets[i]:.1f}mm exceeds ±{MAX_JOG_LINEAR}mm")
+        for i in range(3, 6):
+            if abs(offsets[i]) > MAX_JOG_ROT:
+                raise ValueError(f"Jog offset {['RX','RY','RZ'][i-3]}={offsets[i]:.1f}° exceeds ±{MAX_JOG_ROT}°")
+        x, y, z, rx, ry, rz = offsets
         if wait:
             current_pose = self.get_cartesian_pose()
             target = [

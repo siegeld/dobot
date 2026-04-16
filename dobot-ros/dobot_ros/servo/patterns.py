@@ -129,6 +129,12 @@ def build_pattern(name: str, params: dict) -> Pattern:
         if key in params:
             params[key] = min(float(params[key]), _MAX_XYZ_AMPLITUDE_MM)
 
+    # Prevent division by zero in period/frequency.
+    if "period_s" in params:
+        params["period_s"] = max(0.1, float(params["period_s"]))
+    if "freq_hz" in params:
+        params["freq_hz"] = max(0.0, float(params["freq_hz"]))  # 0 is safe (sine=0)
+
     # Validate axis for square/sine patterns.
     if "axis" in params:
         axis = str(params["axis"]).lower()

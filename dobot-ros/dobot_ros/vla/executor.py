@@ -222,11 +222,19 @@ class VLAExecutor:
 
     def _execute_one(self, action: List[float], period: float):
         """Apply one interpolated action: safety → ServoP → maybe gripper."""
+        import math as _math
         t0 = time.perf_counter()
 
         # Action layout: [dx, dy, dz, drx, dry, drz, gripper_target_or_None]
         delta = list(action[:6])
         gripper = action[6]
+
+        # Reject NaN/Inf from the model — do NOT propagate to safety_apply or servo_p.
+        if not all(_math.isfinite(d) for d in delta):
+            log.warning("model returned non-finite delta: %s — skipping", delta)
+            return
+        if gripper is not None and not _math.isfinite(gripper):
+            gripper = None  # skip gripper for this step
 
         current_pose = self.ros.get_cartesian_pose()
         clamp = safety_apply(current_pose, delta, self.limits)

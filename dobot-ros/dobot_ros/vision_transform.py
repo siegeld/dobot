@@ -305,6 +305,15 @@ class VisionTransform:
 
         H = cam_centered.T @ rob_centered
         U, S, Vt = np.linalg.svd(H)
+
+        # Check for degenerate (near-collinear) points. For table-plane
+        # calibration, points are inherently planar (one small singular value
+        # is expected). Collinear means TWO small values — check the second.
+        if len(S) >= 2 and S[-2] < 1e-6:
+            raise ValueError(
+                "correspondence points are near-collinear (degenerate). "
+                "Record points that are NOT all on a straight line."
+            )
         d = np.linalg.det(Vt.T @ U.T)
         sign_matrix = np.diag([1, 1, d])
         R = Vt.T @ sign_matrix @ U.T

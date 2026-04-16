@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Deque, List, Optional
 
 from dobot_ros.servo.patterns import Pattern
-from dobot_ros.vla.safety import SafetyLimits, apply as safety_apply
+from dobot_ros.vla.safety import SafetyLimits, clamp_pose, apply as safety_apply
 
 
 log = logging.getLogger(__name__)
@@ -207,7 +207,6 @@ class ServoTester:
                 # We DON'T clamp per-step delta here because the tester
                 # explicitly wants to test arbitrary targets; workspace bounds
                 # are the floor we won't cross.
-                from dobot_ros.vla.safety import clamp_pose
                 clamped, reasons = clamp_pose(commanded, self.limits)
                 if reasons:
                     with self._lock:

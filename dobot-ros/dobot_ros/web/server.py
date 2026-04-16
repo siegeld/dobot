@@ -162,9 +162,11 @@ app = FastAPI(title="Dobot CR5 Controller", lifespan=lifespan)
 
 # ── Models ──────────────────────────────────────────────────────
 
+_VALID_JOG_AXES = {"x", "y", "z", "rx", "ry", "rz", "j1", "j2", "j3", "j4", "j5", "j6"}
+
 class JogRequest(BaseModel):
     axis: str  # x, y, z, rx, ry, rz, j1-j6
-    distance: float
+    distance: float  # mm or degrees; clamped in handler
     speed: int = 50
     mode: str = "user"  # user or tool
 
@@ -322,22 +324,29 @@ async def set_speed(req: SpeedRequest):
 async def jog_robot(req: JogRequest):
     """Jog robot by relative distance."""
     try:
-        client = _get_client()
-        client.set_speed_factor(req.speed)
-        with _lock:
-            _state["speed_factor"] = req.speed
-
         axis = req.axis.lower()
+        if axis not in _VALID_JOG_AXES:
+            return {"success": False, "error": f"invalid axis '{req.axis}' — must be one of {sorted(_VALID_JOG_AXES)}"}
+
+        # Clamp distance to safe range and speed to [1, 100].
+        distance = max(-500.0, min(500.0, float(req.distance)))
+        speed = max(1, min(100, int(req.speed)))
+
+        client = _get_client()
+        client.set_speed_factor(speed)
+        with _lock:
+            _state["speed_factor"] = speed
+
         if axis.startswith('j'):
             joint_num = int(axis[1])
-            client.jog_joint(joint_num, req.distance)
+            client.jog_joint(joint_num, distance)
         else:
             client.set_jog_mode(req.mode)
             params = {a: 0.0 for a in ('x', 'y', 'z', 'rx', 'ry', 'rz')}
-            params[axis] = req.distance
+            params[axis] = distance
             client.jog(**params)
 
-        return {"success": True, "axis": req.axis, "distance": req.distance}
+        return {"success": True, "axis": req.axis, "distance": distance}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -750,7 +759,7 @@ async def workspace_move(req: dict):
             return {"success": False, "error": "Need at least 3 table points"}
 
         pos = req.get("position", "center")
-        height_mm = req.get("height_mm", 127)
+        height_mm = max(0, min(500, float(req.get("height_mm", 127))))  # clamp to safe range
 
         import numpy as np
         pts_arr = np.array(pts)
@@ -1937,9 +1946,11 @@ async def settings_download_saved(name: str):
         bundle = _settings_store.get_saved(name)
         content = json.dumps(bundle, indent=2)
         from fastapi.responses import Response
+        from dobot_ros.web.settings_store import slugify
+        safe_name = slugify(name)
         return Response(
             content=content, media_type="application/json",
-            headers={"Content-Disposition": f'attachment; filename="{name}.json"'},
+            headers={"Content-Disposition": f'attachment; filename="{safe_name}.json"'},
         )
     except SettingsNotFound as e:
         raise HTTPException(status_code=404, detail=str(e))
