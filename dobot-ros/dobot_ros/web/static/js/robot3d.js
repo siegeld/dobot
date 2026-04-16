@@ -441,12 +441,14 @@ function simulationTick() {
   const totalDur = simSteps.length * simStepDuration;
 
   if (elapsed >= totalDur) {
-    // Simulation complete — show final pose, call callback.
+    // Simulation complete — show final pose, stop simulation, call callback ONCE.
     const last = simSteps[simSteps.length - 1];
     setJointsDirect(last.joints);
     updateGripperPosition((last.gripper_pos || 0) / 1000.0);
     if (simLabel) simLabel.textContent = `Step ${simSteps.length}/${simSteps.length}: ${last.label || 'done'}`;
-    if (simOnComplete) setTimeout(simOnComplete, 300);
+    const cb = simOnComplete;
+    stopSimulation();  // sets simulating=false, removes ghost, hides badge
+    if (cb) setTimeout(cb, 300);
     return;
   }
 

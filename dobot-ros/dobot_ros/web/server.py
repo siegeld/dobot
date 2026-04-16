@@ -57,9 +57,15 @@ _state = {
 }
 
 
+_client_init_lock = threading.Lock()
+
 def _get_client() -> DobotRosClient:
     global _client, _executor
-    if _client is None:
+    if _client is not None:
+        return _client
+    with _client_init_lock:
+        if _client is not None:
+            return _client  # another thread initialized while we waited
         if not rclpy.ok():
             rclpy.init()
         _executor = MultiThreadedExecutor()
@@ -70,15 +76,9 @@ def _get_client() -> DobotRosClient:
             managed_executor=True,
         )
         _executor.add_node(_client)
-        # Dedicated spin thread processes ALL callbacks (topics + service responses)
-        # continuously — no more fighting between poll thread and API calls.
         spin_thread = threading.Thread(target=_executor.spin, daemon=True)
         spin_thread.start()
 
-        # Reconcile global speed with the settings store so the status display
-        # reflects reality, not the cached default. Fire and forget — the robot
-        # may not accept the command until Enable, in which case the next
-        # /api/speed or /api/enable call will push it again.
         try:
             stored = int(_settings_store.get("jog").get("speed", 5))
         except Exception:
@@ -749,7 +749,7 @@ def _get_min_clearance_mm() -> float:
 
 
 @app.post("/api/calibration/workspace-move")
-async def workspace_move(req: dict):
+def workspace_move(req: dict):
     """Move robot to a workspace position (center or corner) at given height above table."""
     try:
         data = json.loads(_TABLE_FILE.read_text()) if _TABLE_FILE.exists() else {}
@@ -878,7 +878,7 @@ class PickPlanRequest(BaseModel):
 
 
 @app.post("/api/pick/plan")
-async def pick_plan(req: PickPlanRequest):
+def pick_plan(req: PickPlanRequest):
     """Resolve a target (pixel or object id) into robot coordinates and
     compute the full waypoint plan for preview. Does NOT move the robot.
 
@@ -975,17 +975,20 @@ class PickExecuteRequest(PickPlanRequest):
 
 
 @app.post("/api/pick/execute")
-async def pick_execute(req: PickExecuteRequest):
+def pick_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool so the event loop stays free
     """Execute a full pick sequence: approach → grasp → retract.
     The client must send confirm=true — a safety interlock so an errant POST
     can't launch the robot."""
+    blocked = _check_motion_free("pick")
+    if blocked:
+        return JSONResponse(status_code=409, content={"success": False, "error": blocked})
     if not req.confirm:
         return JSONResponse(status_code=400,
             content={"success": False, "error": "pass confirm=true to execute"})
 
     # Re-plan just before executing — no stale waypoints.
     plan_req = PickPlanRequest(**{k: getattr(req, k) for k in PickPlanRequest.model_fields.keys()})
-    plan_resp = await pick_plan(plan_req)
+    plan_resp = pick_plan(plan_req)
     if isinstance(plan_resp, JSONResponse):
         return plan_resp
     if not plan_resp.get("success"):
@@ -1232,7 +1235,7 @@ async def vision_calibrate():
 
 
 @app.post("/api/vision/plan")
-async def vision_plan(req: PickPlanRequest):
+def vision_plan(req: PickPlanRequest):
     """Plan a pick using ray-plane projection (no depth for XY).
 
     Returns the full preview: projected table XY, corrected rotation,
@@ -1397,16 +1400,19 @@ async def vision_plan(req: PickPlanRequest):
 
 
 @app.post("/api/vision/execute")
-async def vision_execute(req: PickExecuteRequest):
+def vision_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool
     """Execute a pick planned via ray-plane projection. Re-plans internally
     to use fresh detection data. Requires confirm=true."""
+    blocked = _check_motion_free("pick")
+    if blocked:
+        return JSONResponse(status_code=409, content={"success": False, "error": blocked})
     if not req.confirm:
         return JSONResponse(status_code=400,
             content={"success": False, "error": "pass confirm=true to execute"})
 
     # Re-plan with vision pipeline.
     plan_req = PickPlanRequest(**{k: getattr(req, k) for k in PickPlanRequest.model_fields.keys()})
-    plan_resp = await vision_plan(plan_req)
+    plan_resp = vision_plan(plan_req)
     if isinstance(plan_resp, JSONResponse):
         return plan_resp
     if not plan_resp.get("success"):
@@ -1514,6 +1520,29 @@ _vla_lock = threading.Lock()
 
 VLA_EPISODES_DIR = os.environ.get("VLA_EPISODES_DIR", "/data/episodes")
 VLA_OFT_URL = os.environ.get("VLA_OFT_URL", "http://gpurbr2:7071")
+
+# Global motion mode guard — prevents competing motion streams.
+_motion_lock = threading.Lock()
+_motion_active: Optional[str] = None  # "servo" | "vla" | "pick" | None
+
+
+def _check_motion_free(mode: str) -> Optional[str]:
+    """Check that no other motion mode is active. Returns an error message if blocked."""
+    with _motion_lock:
+        if _motion_active is not None and _motion_active != mode:
+            return f"{_motion_active} is currently active — stop it first"
+        # Also check the actual running state.
+        if _servo_tester is not None and _servo_tester.is_running() and mode != "servo":
+            return "servo tester is running — stop it first"
+        if _vla_executor is not None and _vla_executor.is_running() and mode != "vla":
+            return "VLA executor is running — stop it first"
+    return None
+
+
+def _set_motion_active(mode: Optional[str]):
+    with _motion_lock:
+        global _motion_active
+        _motion_active = mode
 
 
 # ── Settings store (single source of truth for persistent UI + VLA + servo config) ─

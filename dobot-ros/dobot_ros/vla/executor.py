@@ -111,6 +111,13 @@ class VLAExecutor:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=timeout)
+            if self._thread.is_alive():
+                log.warning("VLA executor thread did not stop within %ss — still alive", timeout)
+                with self._lock:
+                    self._status.last_error = "stop timed out — thread still running"
+                # Do NOT set running=False if the thread is still alive, to prevent
+                # a second executor from starting while this one is still streaming.
+                return
         with self._lock:
             self._status.running = False
         log.info("VLA executor stopped")

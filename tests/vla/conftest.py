@@ -69,6 +69,7 @@ class MockRosClient:
     # Commands.
     def start_drag(self): return 0
     def stop_drag(self): return 0
+    def stop(self): return 0
 
     def servo_p(self, pose, t=0.1, aheadtime=50.0, gain=500.0):
         self.servo_p_calls.append({

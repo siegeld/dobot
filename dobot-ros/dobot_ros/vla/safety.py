@@ -77,6 +77,12 @@ def clamp_delta(delta: List[float], limits: SafetyLimits) -> Tuple[List[float], 
     """Clamp a raw delta action to per-step motion caps. Scales XYZ uniformly to
     preserve direction if the norm exceeds max_xyz_step_mm."""
     reasons: List[str] = []
+
+    # NaN/Inf guard — reject before any arithmetic.
+    if not all(math.isfinite(v) for v in delta):
+        reasons.append("non-finite delta values")
+        return [0.0] * 6, reasons
+
     dx, dy, dz, drx, dry, drz = delta
 
     xyz_norm = math.sqrt(dx * dx + dy * dy + dz * dz)
@@ -100,6 +106,11 @@ def clamp_delta(delta: List[float], limits: SafetyLimits) -> Tuple[List[float], 
 def clamp_pose(pose: List[float], limits: SafetyLimits) -> Tuple[List[float], List[str]]:
     """Clamp an absolute pose to workspace bounds."""
     reasons: List[str] = []
+
+    if not all(math.isfinite(v) for v in pose):
+        reasons.append("non-finite pose values")
+        return list(pose), reasons  # return as-is; caller should abort
+
     x, y, z, rx, ry, rz = pose
 
     for name, v, lo, hi in (

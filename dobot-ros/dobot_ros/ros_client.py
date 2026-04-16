@@ -185,14 +185,24 @@ class DobotRosClient(Node):
         These are deliberately wide — they catch gross errors (off by 10×)
         without interfering with normal workspace-bounded operations.
         The robot's own joint limits provide the real constraint."""
-        MAX_XYZ = 1500.0   # mm — CR5 reach is ~900mm; 1500 catches gross errors
+        MAX_XY = 1500.0    # mm — CR5 reach is ~900mm; 1500 catches gross errors
+        MIN_Z = -200.0     # mm — wrist Z should never go far below the base plane
+        MAX_Z = 1500.0     # mm
         MAX_ROT = 360.0    # deg
         labels = ["X", "Y", "Z", "RX", "RY", "RZ"]
-        for i in range(3):
-            if abs(pose[i]) > MAX_XYZ:
+        for i in range(2):  # X, Y
+            if abs(pose[i]) > MAX_XY:
                 raise ValueError(
-                    f"Pose {labels[i]}={pose[i]:.1f}mm exceeds hard limit ±{MAX_XYZ}mm"
+                    f"Pose {labels[i]}={pose[i]:.1f}mm exceeds hard limit ±{MAX_XY}mm"
                 )
+        if pose[2] < MIN_Z:
+            raise ValueError(
+                f"Pose Z={pose[2]:.1f}mm below hard floor {MIN_Z}mm"
+            )
+        if pose[2] > MAX_Z:
+            raise ValueError(
+                f"Pose Z={pose[2]:.1f}mm exceeds hard ceiling {MAX_Z}mm"
+            )
         for i in range(3, 6):
             if abs(pose[i]) > MAX_ROT:
                 raise ValueError(
@@ -536,10 +546,15 @@ class DobotRosClient(Node):
         self,
         target: List[float],
         tolerance: float = 1.0,
+        angle_tolerance: float = 3.0,
         timeout: float = 30.0,
         feedback_callback=None,
     ) -> bool:
-        """Wait for robot to reach target cartesian position."""
+        """Wait for robot to reach target cartesian position AND orientation.
+
+        tolerance: XYZ Euclidean distance in mm.
+        angle_tolerance: max angular error in degrees for RX/RY/RZ.
+        """
         import time
         import math
         start_time = time.time()
@@ -552,10 +567,21 @@ class DobotRosClient(Node):
                 (current[2] - target[2])**2
             )
 
+            # Check orientation convergence if target has 6 elements.
+            angle_ok = True
+            if len(target) >= 6 and len(current) >= 6:
+                for i in range(3, 6):
+                    # Handle angle wrapping (e.g., 179° vs -179°).
+                    diff = abs(current[i] - target[i])
+                    diff = min(diff, 360.0 - diff)
+                    if diff > angle_tolerance:
+                        angle_ok = False
+                        break
+
             if feedback_callback:
                 feedback_callback(current, distance)
 
-            if distance <= tolerance:
+            if distance <= tolerance and angle_ok:
                 return True
             time.sleep(0.1)
 
