@@ -940,6 +940,7 @@
     initHashNav();
     initTooltips();
     initCalibrationTab();
+    initVisionTab();
 
     // Global E-STOP in the navbar — halts any active servo streaming and
     // calls ros.stop() regardless of current tab. Safe to click anytime.
@@ -1298,6 +1299,41 @@
       calStopObjectPolling();
     });
 
+    // Solve vision transform (local SVD).
+    document.getElementById('btn-cal-solve')?.addEventListener('click', async () => {
+      logActivity('Solving vision transform (local SVD)...', 'info');
+      const r = await fetch('/api/vision/calibrate', { method: 'POST' });
+      const res = await r.json();
+      if (res.success) {
+        logActivity(`Vision transform solved: error=${res.error_mm}mm, ${res.num_points} pts`, 'success');
+        showToast(`Solved: ${res.error_mm}mm error`, 'success');
+        const sr = document.getElementById('cal-solve-result');
+        if (sr) {
+          sr.style.display = '';
+          document.getElementById('cal-solve-error').textContent = res.error_mm + ' mm';
+          document.getElementById('cal-solve-points').textContent = res.num_points;
+          document.getElementById('cal-solve-intrinsics').textContent =
+            `fx=${res.intrinsics?.fx?.toFixed(0)} fy=${res.intrinsics?.fy?.toFixed(0)}`;
+          document.getElementById('cal-solve-table-z').textContent = res.table_z?.toFixed(1) + ' mm';
+        }
+        calRefreshPhaseIndicator();
+      } else {
+        showToast(`Solve failed: ${res.error}`, 'danger');
+        logActivity(`Solve failed: ${res.error}`, 'error');
+      }
+    });
+
+    // Also solve on camera server (backward compat).
+    document.getElementById('btn-cal-solve-camera')?.addEventListener('click', async () => {
+      const r = await fetch('/api/calibration/solve', { method: 'POST' });
+      const res = await r.json();
+      if (res.success || res.solved) {
+        showToast(`Camera server solved: ${res.error_mm}mm`, 'success');
+      } else {
+        showToast(`Camera solve failed: ${res.error || 'unknown'}`, 'danger');
+      }
+    });
+
     // Single-touch table Z record.
     document.getElementById('btn-cal-table-z')?.addEventListener('click', async () => {
       const r = await fetch('/api/calibration/table/z', { method: 'POST' });
@@ -1498,22 +1534,340 @@
     if (disp) disp.textContent = hasTable ? `${tableZ.toFixed(1)} mm` : '--';
 
     const camStat = await fetch('/api/calibration/status').then(r => r.json()).catch(() => ({}));
-    const hasCam = !!camStat.solved;
+    const hasPoints = (camStat.num_points || 0) >= 3;
     const p2 = document.getElementById('cal-phase-2');
     const p2s = document.getElementById('cal-phase-2-state');
     if (p2 && p2s) {
-      p2.className = 'badge ' + (hasCam ? 'bg-success' : 'bg-secondary');
-      p2s.textContent = hasCam ? `✔ ${camStat.num_points} pts` : 'needed';
+      p2.className = 'badge ' + (hasPoints ? 'bg-success' : 'bg-secondary');
+      p2s.textContent = hasPoints ? `✔ ${camStat.num_points} pts` : `${camStat.num_points || 0}/3`;
     }
 
-    const ready = hasTable && hasCam;
+    const visStat = await fetch('/api/vision/status').then(r => r.json()).catch(() => ({}));
+    const hasSolved = !!visStat.calibrated;
     const p3 = document.getElementById('cal-phase-3');
     const p3s = document.getElementById('cal-phase-3-state');
     if (p3 && p3s) {
-      p3.className = 'badge ' + (ready ? 'bg-primary' : 'bg-secondary');
-      p3s.textContent = ready ? 'ready' : 'waiting';
+      p3.className = 'badge ' + (hasSolved ? 'bg-success' : 'bg-secondary');
+      p3s.textContent = hasSolved ? '✔ solved' : 'needed';
     }
-    document.getElementById('btn-cal-pick-execute')?.toggleAttribute('disabled', !ready);
+
+    const ready = hasTable && hasPoints && hasSolved;
+    const badge = document.getElementById('cal-status-badge');
+    if (badge) {
+      badge.textContent = ready ? 'Calibrated' : 'Not Calibrated';
+      badge.className = ready ? 'text-success small' : 'text-warning small';
+    }
+  }
+
+  // ── Vision tab ─────────────────────────────────────────────────
+
+  const _visState = { objects: [], target: null, plan: null, pollTimer: null };
+
+  function initVisionTab() {
+    const btn = document.getElementById('tab-vision-btn');
+    if (!btn) return;
+
+    btn.addEventListener('shown.bs.tab', () => {
+      visRefreshFeed();
+      visRefreshStatus();
+      visStartPolling();
+    });
+    btn.addEventListener('hidden.bs.tab', visStopPolling);
+
+    document.getElementById('btn-vis-refresh')?.addEventListener('click', () => {
+      visRefreshFeed(); visFetchObjects();
+    });
+    document.getElementById('vis-show-objects')?.addEventListener('change', visDrawOverlay);
+    document.getElementById('vis-show-grid')?.addEventListener('change', visDrawOverlay);
+    document.getElementById('btn-vis-cancel')?.addEventListener('click', () => {
+      _visState.target = null; _visState.plan = null;
+      visRenderPreview(null); visDrawOverlay();
+    });
+    document.getElementById('btn-vis-simulate')?.addEventListener('click', visSimulate);
+    document.getElementById('btn-vis-execute')?.addEventListener('click', visExecute);
+
+    // Click on camera view → select target.
+    document.getElementById('vis-camera-container')?.addEventListener('click', (ev) => {
+      const img = document.getElementById('vis-camera-feed');
+      if (!img || !img.naturalWidth) return;
+      const rect = img.getBoundingClientRect();
+      const sx = img.naturalWidth / rect.width;
+      const sy = img.naturalHeight / rect.height;
+      const px = Math.round((ev.clientX - rect.left) * sx);
+      const py = Math.round((ev.clientY - rect.top) * sy);
+      document.getElementById('vis-pixel').textContent = `${px}, ${py}`;
+
+      const hit = _visState.objects.find(o => {
+        const [bx, by, bw, bh] = o.bbox || [0,0,0,0];
+        return px >= bx && px <= bx+bw && py >= by && py <= by+bh;
+      });
+      visPlanTarget(hit ? { kind: 'object', object_id: hit.id } : { kind: 'pixel', px, py });
+    });
+  }
+
+  function visRefreshFeed() {
+    const img = document.getElementById('vis-camera-feed');
+    if (img) { img.src = '/api/calibration/camera-frame?' + Date.now(); img.style.display='block'; }
+  }
+
+  async function visRefreshStatus() {
+    try {
+      const s = await fetch('/api/vision/status').then(r => r.json());
+      const b = document.getElementById('vis-cal-badge');
+      if (b) {
+        b.textContent = s.calibrated ? 'Calibrated' : 'Not Calibrated';
+        b.className = 'badge ' + (s.calibrated ? 'bg-success' : 'bg-warning');
+      }
+      const tz = document.getElementById('vis-table-z');
+      if (tz) tz.textContent = s.table_z != null ? s.table_z.toFixed(1) + ' mm' : '--';
+      const intr = document.getElementById('vis-intrinsics');
+      if (intr) intr.textContent = s.intrinsics ? `${s.intrinsics.fx.toFixed(0)}×${s.intrinsics.fy.toFixed(0)}` : 'default';
+    } catch (e) {}
+  }
+
+  function visStartPolling() {
+    visFetchObjects();
+    if (_visState.pollTimer) clearInterval(_visState.pollTimer);
+    _visState.pollTimer = setInterval(visFetchObjects, 1500);
+  }
+  function visStopPolling() {
+    if (_visState.pollTimer) { clearInterval(_visState.pollTimer); _visState.pollTimer = null; }
+  }
+
+  async function visFetchObjects() {
+    try {
+      const d = await fetch('/api/detection/objects').then(r => r.json());
+      _visState.objects = d.objects || [];
+      visDrawOverlay();
+    } catch (e) {}
+  }
+
+  function visDrawOverlay() {
+    const img = document.getElementById('vis-camera-feed');
+    const canvas = document.getElementById('vis-overlay');
+    if (!img || !canvas || img.style.display === 'none') return;
+    canvas.width = img.naturalWidth || 640;
+    canvas.height = img.naturalHeight || 360;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Object bounding boxes.
+    if (document.getElementById('vis-show-objects')?.checked !== false) {
+      _visState.objects.forEach(o => {
+        const [x, y, w, h] = o.bbox || [0,0,0,0];
+        const isSel = _visState.target?.kind === 'object' && _visState.target.object_id === o.id;
+        ctx.strokeStyle = isSel ? '#00ff88' : '#ffcc00';
+        ctx.lineWidth = isSel ? 3 : 2;
+        ctx.strokeRect(x, y, w, h);
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillText(`#${o.id} ${o.label || ''}`.trim(), x + 3, Math.max(14, y - 4));
+      });
+    }
+
+    // Selected target crosshair.
+    const plan = _visState.plan;
+    if (plan && plan.overlay_pixels?.target) {
+      const [tx, ty] = plan.overlay_pixels.target;
+      ctx.strokeStyle = '#ff4444';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(tx - 20, ty); ctx.lineTo(tx + 20, ty);
+      ctx.moveTo(tx, ty - 20); ctx.lineTo(tx, ty + 20);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Waypoint markers on the image.
+    if (plan && plan.overlay_pixels) {
+      const markers = [
+        ['approach', '#44aaff', 'A'],
+        ['grasp', '#ff4444', 'G'],
+        ['retract', '#44ff44', 'R'],
+      ];
+      markers.forEach(([key, color, lbl]) => {
+        const px = plan.overlay_pixels[key];
+        if (!px) return;
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.arc(px[0], px[1], 6, 0, 2*Math.PI); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillText(lbl, px[0] - 3, px[1] + 4);
+      });
+    }
+  }
+
+  async function visPlanTarget(target) {
+    _visState.target = target;
+    const body = target.kind === 'object'
+      ? { object_id: target.object_id }
+      : { px: target.px, py: target.py };
+    body.approach_mm = parseFloat(document.getElementById('vis-approach-mm')?.value || 100);
+    body.grasp_clearance_mm = parseFloat(document.getElementById('vis-grasp-mm')?.value || 5);
+    body.lift_mm = parseFloat(document.getElementById('vis-lift-mm')?.value || 150);
+
+    try {
+      const r = await fetch('/api/vision/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const res = await r.json();
+      if (res.success) {
+        _visState.plan = res;
+        visRenderPreview(res);
+        visDrawOverlay();
+      } else {
+        showToast(`Plan: ${res.error}`, 'danger');
+        _visState.plan = null;
+        visRenderPreview(null);
+      }
+    } catch (e) {
+      showToast(`Plan error: ${e}`, 'danger');
+    }
+  }
+
+  function visRenderPreview(plan) {
+    const hint = document.getElementById('vis-target-hint');
+    const preview = document.getElementById('vis-preview');
+    if (!plan) {
+      if (hint) hint.style.display = '';
+      if (preview) preview.style.display = 'none';
+      return;
+    }
+    if (hint) hint.style.display = 'none';
+    if (preview) preview.style.display = '';
+
+    const t = plan.target;
+    const d = plan.depth_check;
+    const c = plan.confidence;
+    const wp = plan.waypoints;
+
+    const fmtP = (p) => p ? `(${p[0]}, ${p[1]}, ${p[2]}) mm` : '--';
+    const $ = id => document.getElementById(id);
+
+    $('vis-p-pixel').textContent = t.pixel ? `(${t.pixel[0]}, ${t.pixel[1]})` : '--';
+    $('vis-p-robot-xy').textContent = t.robot_xy ? `(${t.robot_xy[0]}, ${t.robot_xy[1]}) mm` : '--';
+    $('vis-p-rotation').textContent = `${t.table_rot_deg}° table (${t.image_rot_deg}° image)`;
+    $('vis-p-present').innerHTML = d.object_present
+      ? '<span class="text-success">Yes</span>' : '<span class="text-danger">No</span>';
+    $('vis-p-height').textContent = d.object_height_mm ? d.object_height_mm.toFixed(1) + ' mm' : '--';
+    $('vis-p-exp-depth').textContent = d.expected_depth_m ? d.expected_depth_m + ' m' : '--';
+    $('vis-p-meas-depth').textContent = d.measured_depth_m ? d.measured_depth_m + ' m' : '--';
+
+    const confBadge = $('vis-p-conf-badge');
+    if (confBadge) {
+      const colors = { green: 'bg-success', yellow: 'bg-warning', red: 'bg-danger' };
+      confBadge.className = 'badge ' + (colors[c.level] || 'bg-secondary');
+      confBadge.textContent = `${c.score}/${c.max} ${c.level.toUpperCase()}`;
+    }
+    const confDetail = $('vis-p-conf-detail');
+    if (confDetail && c.signals) {
+      confDetail.textContent = Object.entries(c.signals)
+        .map(([k, v]) => `${k}:${v}`).join(' · ');
+    }
+
+    $('vis-p-approach').textContent = fmtP(wp.approach);
+    $('vis-p-grasp').textContent = fmtP(wp.grasp);
+    $('vis-p-retract').textContent = fmtP(wp.retract);
+
+    const w = document.getElementById('vis-p-warnings');
+    if (plan.warnings?.length) {
+      w.style.display = '';
+      w.innerHTML = plan.warnings.map(x => '<i class="bi bi-exclamation-triangle"></i> ' + x).join('<br>');
+    } else {
+      w.style.display = 'none';
+    }
+  }
+
+  async function visSimulate() {
+    const plan = _visState.plan;
+    if (!plan) { showToast('Select a target first', 'warning'); return; }
+    const wp = plan.waypoints;
+    const poses = [wp.approach, wp.grasp, wp.grasp, wp.retract];
+    try {
+      const r = await fetch('/api/inverse-kin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ poses }),
+      });
+      const res = await r.json();
+      if (!res.success) {
+        showToast(`IK failed: ${res.error}`, 'danger');
+        // Fallback: show plan card without animation.
+        viShowPlanSteps(wp, null);
+        return;
+      }
+      const steps = [
+        { joints: res.joints[0], gripper_pos: 800, label: '1. Approach (gripper open)' },
+        { joints: res.joints[1], gripper_pos: 800, label: '2. Descend to grasp' },
+        { joints: res.joints[2], gripper_pos: 200, label: '3. Close gripper' },
+        { joints: res.joints[3], gripper_pos: 200, label: '4. Retract' },
+      ];
+      viShowPlanSteps(wp, steps);
+      if (window.simulateRobotMotion) {
+        window.simulateRobotMotion(steps, {
+          stepDuration: 1.5,
+          onComplete: () => logActivity('Simulation complete', 'info'),
+        });
+      }
+    } catch (e) {
+      showToast(`Simulate error: ${e}`, 'danger');
+    }
+  }
+
+  function viShowPlanSteps(wp, steps) {
+    const card = document.getElementById('vis-plan-card');
+    const list = document.getElementById('vis-plan-steps');
+    if (!card || !list) return;
+    card.style.display = '';
+    const fmtP = p => p ? `(${p[0]}, ${p[1]}, ${p[2]})` : '--';
+    list.innerHTML = [
+      `<li>Open gripper to 800</li>`,
+      `<li>Move to approach: ${fmtP(wp.approach)}</li>`,
+      `<li>Descend to grasp: ${fmtP(wp.grasp)}</li>`,
+      `<li>Close gripper to 200</li>`,
+      `<li>Retract to: ${fmtP(wp.retract)}</li>`,
+    ].join('');
+  }
+
+  async function visExecute() {
+    const t = _visState.target;
+    if (!t || !_visState.plan) { showToast('Select a target first', 'warning'); return; }
+    const conf = _visState.plan.confidence;
+    if (conf?.level === 'red') {
+      alert('Pick confidence is RED — too risky. Check the flagged signals.');
+      return;
+    }
+    const desc = t.kind === 'object' ? `object #${t.object_id}` : `pixel (${t.px}, ${t.py})`;
+    if (!confirm(`Execute pick on ${desc}?\n\nOpen → approach → descend → close → retract.`)) return;
+
+    const body = t.kind === 'object'
+      ? { object_id: t.object_id, confirm: true }
+      : { px: t.px, py: t.py, confirm: true };
+    body.approach_mm = parseFloat(document.getElementById('vis-approach-mm')?.value || 100);
+    body.grasp_clearance_mm = parseFloat(document.getElementById('vis-grasp-mm')?.value || 5);
+    body.lift_mm = parseFloat(document.getElementById('vis-lift-mm')?.value || 150);
+
+    try {
+      logActivity(`Executing pick: ${desc}...`, 'info');
+      const r = await fetch('/api/vision/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const res = await r.json();
+      if (res.success) {
+        logActivity('Pick complete!', 'success');
+        showToast('Pick complete', 'success');
+      } else {
+        logActivity(`Pick failed: ${res.error}`, 'error');
+        showToast(`Pick failed: ${res.error}`, 'danger');
+      }
+    } catch (e) {
+      showToast(`Execute error: ${e}`, 'danger');
+    }
   }
 
   // ── Tooltips ──────────────────────────────────────────────────
@@ -1575,6 +1929,7 @@
     'dashboard':   'tab-dashboard-btn',
     'calibration': 'tab-calibration-btn',
     'vla':         'tab-vla-btn',
+    'vision':      'tab-vision-btn',
     'servo':       'tab-servo-btn',
     'settings':    'tab-settings-btn',
   };

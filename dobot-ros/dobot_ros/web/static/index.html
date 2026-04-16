@@ -235,6 +235,11 @@
           </button>
         </li>
         <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-vision-btn" data-bs-toggle="tab" data-bs-target="#tab-vision" type="button" role="tab">
+            <i class="bi bi-eye"></i> Vision
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-servo-btn" data-bs-toggle="tab" data-bs-target="#tab-servo" type="button" role="tab">
             <i class="bi bi-speedometer2"></i> Servo
           </button>
@@ -412,24 +417,25 @@
         </div>
 
         <!-- ─── Calibration Tab ─── -->
+        <!-- ─── Calibration Tab (setup only — pick is in the Vision tab) ─── -->
         <div class="tab-pane fade" id="tab-calibration" role="tabpanel" aria-labelledby="tab-calibration-btn">
 
           <!-- Phase indicator -->
           <div class="card mb-2">
             <div class="card-body py-2">
               <div class="d-flex align-items-center gap-3 flex-wrap">
-                <strong>Setup → Pick:</strong>
+                <strong>Setup steps:</strong>
                 <span id="cal-phase-1" class="badge bg-secondary" data-bs-toggle="tooltip"
-                      title="Touch the gripper tip to the table surface and record the wrist Z. Only needed once per mounting.">
+                      title="Touch the gripper tip to the table surface and record the wrist Z.">
                   1. Table Z: <span id="cal-phase-1-state">?</span>
                 </span>
                 <span id="cal-phase-2" class="badge bg-secondary" data-bs-toggle="tooltip"
-                      title="Record 3+ (pixel, robot XYZ) correspondences and solve for the camera-to-robot transform.">
-                  2. Camera: <span id="cal-phase-2-state">?</span>
+                      title="Record 3+ (pixel, robot XYZ) correspondences on the camera server.">
+                  2. Points: <span id="cal-phase-2-state">?</span>
                 </span>
                 <span id="cal-phase-3" class="badge bg-secondary" data-bs-toggle="tooltip"
-                      title="Click an object or pixel in the camera view, preview the planned motion, confirm to pick.">
-                  3. Pick: <span id="cal-phase-3-state">waiting</span>
+                      title="Solve the camera-to-robot transform (R, t) and camera intrinsics locally. This creates vision_calibration.json used by the Vision tab.">
+                  3. Solve: <span id="cal-phase-3-state">?</span>
                 </span>
                 <span class="ms-auto text-muted small" id="cal-status-badge">Not Calibrated</span>
               </div>
@@ -437,7 +443,7 @@
           </div>
 
           <div class="row g-2">
-            <!-- Camera view (dominant) -->
+            <!-- Camera view -->
             <div class="col-md-8">
               <div class="card">
                 <div class="card-header d-flex align-items-center gap-3 py-2">
@@ -445,11 +451,6 @@
                           data-bs-toggle="tooltip" title="Reload the camera frame. Auto-fires when you open this tab.">
                     <i class="bi bi-camera"></i> Refresh
                   </button>
-                  <div class="form-check form-check-sm m-0" data-bs-toggle="tooltip"
-                       title="Overlay bounding boxes from the camera's object detection. Click a box to select that object as a pick target.">
-                    <input class="form-check-input" type="checkbox" id="cal-show-objects" checked>
-                    <label class="form-check-label small" for="cal-show-objects">Show detected objects</label>
-                  </div>
                   <small class="text-muted ms-auto">
                     Pixel: <span id="cal-pixel" class="text-info">--</span>
                     &nbsp;·&nbsp; Depth: <span id="cal-depth-live" class="text-warning">--</span>
@@ -457,7 +458,7 @@
                 </div>
                 <div class="card-body p-2">
                   <div id="cal-camera-container" style="position:relative; width:100%; overflow:hidden;">
-                    <img id="cal-camera-feed" src="" alt="Camera view"
+                    <img id="cal-camera-feed" src="" alt="Camera view — click a pixel to select it for calibration"
                          class="img-fluid rounded" style="cursor:crosshair; display:none; width:100%;">
                     <canvas id="cal-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
                     <canvas id="cal-obj-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
@@ -466,74 +467,33 @@
               </div>
             </div>
 
-            <!-- Right rail -->
+            <!-- Right rail: setup cards -->
             <div class="col-md-4">
 
-              <!-- Pick target + preview (primary action once calibrated) -->
-              <div class="card mb-2" id="cal-pick-card">
-                <div class="card-header py-2 d-flex justify-content-between align-items-center">
-                  <span><i class="bi bi-hand-index-thumb"></i> Pick target</span>
-                  <button class="btn btn-outline-secondary btn-xs" id="btn-cal-refresh-objects"
-                          data-bs-toggle="tooltip" title="Re-fetch the detected-objects list.">
-                    <i class="bi bi-arrow-clockwise"></i>
-                  </button>
-                </div>
-                <div class="card-body py-2">
-                  <div id="cal-pick-target" class="small text-muted mb-2">
-                    Click an object or pixel in the camera view to select a target.
-                  </div>
-                  <div id="cal-pick-preview" class="small" style="display:none;">
-                    <table class="table table-sm table-borderless mb-2 info-table">
-                      <tr><td class="text-muted">Camera XYZ</td><td id="cal-pick-cam-xyz">--</td></tr>
-                      <tr><td class="text-muted">Robot XYZ</td><td id="cal-pick-rob-xyz">--</td></tr>
-                      <tr><td class="text-muted">Approach</td><td id="cal-pick-approach">--</td></tr>
-                      <tr><td class="text-muted">Grasp</td><td id="cal-pick-grasp">--</td></tr>
-                      <tr><td class="text-muted">Retract</td><td id="cal-pick-retract">--</td></tr>
-                    </table>
-                    <div id="cal-pick-warnings" class="text-warning small mb-2" style="display:none;"></div>
-                    <div class="d-flex gap-2">
-                      <button class="btn btn-success btn-sm flex-fill" id="btn-cal-pick-execute"
-                              data-bs-toggle="tooltip" data-bs-html="true"
-                              title="<b>Execute the pick.</b><br>Open gripper → approach → descend to grasp → close gripper → retract. Uses MovL (queued), not streaming servo.">
-                        <i class="bi bi-play-fill"></i> Pick
-                      </button>
-                      <button class="btn btn-outline-secondary btn-sm" id="btn-cal-pick-cancel"
-                              data-bs-toggle="tooltip" title="Clear the current target without moving.">
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Table Z (single-touch) -->
+              <!-- 1. Table Z (single-touch) -->
               <div class="card mb-2">
                 <div class="card-header py-2 d-flex justify-content-between align-items-center">
-                  <span><i class="bi bi-arrow-down-square"></i> Table Z</span>
+                  <span><i class="bi bi-arrow-down-square"></i> 1. Table Z</span>
                   <small class="text-muted" id="cal-table-z-display">--</small>
                 </div>
                 <div class="card-body py-2">
                   <p class="small text-muted mb-2">
-                    Touch the gripper tip to the table surface anywhere, then record.
-                    One point is enough for a flat, level table.
+                    Touch the gripper tip to the table surface, then record.
                   </p>
                   <button class="btn btn-warning btn-sm w-100 mb-2" id="btn-cal-table-z"
-                          data-bs-toggle="tooltip" title="Record the current wrist Z as the table floor. Assumes the gripper tip is touching the table surface.">
+                          data-bs-toggle="tooltip" title="Record current wrist Z as the table floor.">
                     <i class="bi bi-arrow-down-square"></i> Record Table Z
                   </button>
                   <div class="d-flex align-items-center gap-2">
-                    <small class="text-muted">Min clearance:</small>
+                    <small class="text-muted">Clearance:</small>
                     <input type="number" class="form-control form-control-sm" id="cal-min-clearance"
                            value="25" min="0" max="200" step="5" style="width:70px;"
-                           data-bs-toggle="tooltip" title="Safety margin (mm) above recorded table Z. Grasp Z is never lower than table_z + this value.">
+                           data-bs-toggle="tooltip" title="Safety margin (mm) above table Z. Gripper never descends below table_z + this.">
                     <small class="text-muted">mm</small>
                     <button class="btn btn-outline-info btn-xs" id="btn-cal-save-clearance">Save</button>
                   </div>
                   <details class="mt-2">
-                    <summary class="small text-muted" data-bs-toggle="tooltip"
-                             title="Legacy 4-point / plane-fit workflow. Only needed if the table is noticeably tilted.">
-                      Advanced: 4-point plane fit
-                    </summary>
+                    <summary class="small text-muted">Advanced: 4-point plane fit</summary>
                     <div class="mt-2">
                       <button class="btn btn-outline-warning btn-sm w-100 mb-2" id="btn-cal-table-point">
                         Record table point (<span id="cal-table-count">0</span>/4)
@@ -556,51 +516,79 @@
                 </div>
               </div>
 
-              <!-- Camera calibration -->
+              <!-- 2. Camera correspondence points -->
               <div class="card mb-2">
                 <div class="card-header py-2 d-flex justify-content-between align-items-center">
-                  <span><i class="bi bi-camera"></i> Camera calibration</span>
-                  <small class="text-muted">
-                    <span id="cal-num-points">0</span> pts · err <span id="cal-error">--</span>
-                  </small>
+                  <span><i class="bi bi-camera"></i> 2. Camera points</span>
+                  <small class="text-muted"><span id="cal-num-points">0</span> pts</small>
                 </div>
                 <div class="card-body py-2">
                   <p class="small text-muted mb-2">
-                    Jog the TCP to a point visible to the camera, click that pixel in the view, then Record. Need 3+ points. Solve once.
+                    Jog TCP to a visible point, click that pixel in the view, then Record. Need 3+ points (4+ recommended).
                   </p>
                   <div class="d-grid gap-2 mb-2">
                     <button class="btn btn-outline-success btn-sm" id="btn-cal-record"
                             data-bs-toggle="tooltip" title="Record a (pixel, robot XYZ) correspondence. Click a pixel first.">
-                      <i class="bi bi-plus-circle"></i> Record camera point
+                      <i class="bi bi-plus-circle"></i> Record point
                     </button>
-                    <div class="d-flex gap-2">
-                      <button class="btn btn-outline-primary btn-sm flex-fill" id="btn-cal-solve"
-                              data-bs-toggle="tooltip" title="Solve the transform once you have ≥3 points.">
-                        Solve
-                      </button>
-                      <button class="btn btn-outline-info btn-sm flex-fill" id="btn-cal-test"
-                              data-bs-toggle="tooltip" title="Compare predicted vs actual robot positions for detected objects.">
-                        Test
-                      </button>
-                      <button class="btn btn-outline-danger btn-sm flex-fill" id="btn-cal-clear"
-                              data-bs-toggle="tooltip" title="Clear all recorded calibration points.">
-                        Clear
-                      </button>
-                    </div>
                   </div>
-                  <button class="btn btn-outline-warning btn-sm w-100" id="btn-cal-drag-toggle"
-                          data-bs-toggle="tooltip" title="Toggle drag mode for hand-guiding the robot to calibration points.">
-                    <i class="bi bi-hand-index"></i> Enable Drag Mode
+                  <div class="d-flex gap-2 mb-2">
+                    <button class="btn btn-outline-info btn-sm flex-fill" id="btn-cal-test"
+                            data-bs-toggle="tooltip" title="Test: project detected objects to robot coords and show error.">
+                      Test
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm flex-fill" id="btn-cal-clear"
+                            data-bs-toggle="tooltip" title="Clear all calibration points.">
+                      Clear
+                    </button>
+                  </div>
+                  <button class="btn btn-outline-warning btn-sm w-100 mb-2" id="btn-cal-drag-toggle"
+                          data-bs-toggle="tooltip" title="Toggle drag mode for hand-guiding to calibration points.">
+                    <i class="bi bi-hand-index"></i> Drag Mode
                   </button>
                   <div id="cal-test-results" class="small mt-2" style="display:none;"></div>
                   <details class="mt-2">
                     <summary class="small text-muted">Recorded points</summary>
-                    <div id="cal-points-list" class="small mt-1" style="max-height:200px; overflow-y:auto;"></div>
+                    <div id="cal-points-list" class="small mt-1" style="max-height:180px; overflow-y:auto;"></div>
                   </details>
                 </div>
               </div>
 
-              <!-- Hidden legacy IDs so existing handlers don't break -->
+              <!-- 3. Solve vision transform -->
+              <div class="card mb-2">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                  <span><i class="bi bi-calculator"></i> 3. Solve</span>
+                  <small class="text-muted">err <span id="cal-error">--</span></small>
+                </div>
+                <div class="card-body py-2">
+                  <p class="small text-muted mb-2">
+                    Solves the camera-to-robot transform (SVD) locally and saves
+                    <code>vision_calibration.json</code>. The Vision tab uses this
+                    for ray-plane projection (no depth needed for XY).
+                  </p>
+                  <div class="d-flex gap-2 mb-2">
+                    <button class="btn btn-primary btn-sm flex-fill" id="btn-cal-solve"
+                            data-bs-toggle="tooltip" data-bs-html="true"
+                            title="<b>Solve the vision transform.</b><br>Requires: Table Z recorded + ≥3 camera points.<br>Fetches camera intrinsics (or uses D435 defaults), runs SVD on the correspondence points, saves R/t locally.">
+                      <i class="bi bi-calculator"></i> Solve Vision Transform
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" id="btn-cal-solve-camera"
+                            data-bs-toggle="tooltip" title="Also solve on the camera server (for backward compat with the old /api/calibration/transform endpoint).">
+                      + Camera
+                    </button>
+                  </div>
+                  <div id="cal-solve-result" class="small" style="display:none;">
+                    <table class="table table-sm table-borderless mb-0 info-table">
+                      <tr><td class="text-muted">Error</td><td id="cal-solve-error">--</td></tr>
+                      <tr><td class="text-muted">Points</td><td id="cal-solve-points">--</td></tr>
+                      <tr><td class="text-muted">Intrinsics</td><td id="cal-solve-intrinsics">--</td></tr>
+                      <tr><td class="text-muted">Table Z</td><td id="cal-solve-table-z">--</td></tr>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Hidden legacy IDs -->
               <span id="cal-main-table-status" class="d-none">--</span>
               <span id="cal-main-table-size" class="d-none">--</span>
               <span id="cal-main-cam-status" class="d-none">--</span>
@@ -608,6 +596,163 @@
               <span id="cal-robot-pos" class="d-none">--</span>
               <input id="cal-ws-height" type="hidden" value="127">
               <select id="cal-jog-step" class="d-none"><option value="5">5</option></select>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─── Vision Tab (operational — camera-guided pick) ─── -->
+        <div class="tab-pane fade" id="tab-vision" role="tabpanel" aria-labelledby="tab-vision-btn">
+
+          <!-- Status bar -->
+          <div class="card mb-2">
+            <div class="card-body py-2">
+              <div class="d-flex align-items-center gap-3 flex-wrap small">
+                <strong>Vision Pick:</strong>
+                <span id="vis-cal-badge" class="badge bg-secondary">--</span>
+                <span class="text-muted">Table Z: <span id="vis-table-z">--</span></span>
+                <span class="text-muted">Intrinsics: <span id="vis-intrinsics">--</span></span>
+                <span class="ms-auto text-muted">
+                  Uses ray-plane projection — no depth for XY.
+                  <i class="bi bi-info-circle" data-bs-toggle="tooltip" data-bs-html="true"
+                     title="<b>How it works:</b><br>1. Click a pixel or detected object<br>2. A ray from the camera through that pixel is intersected with the known table plane (Z = table_z)<br>3. This gives precise robot XY — no depth noise<br>4. Object rotation is corrected for perspective<br>5. Depth is only used for height estimation and presence checks"></i>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="row g-2">
+            <!-- Camera view with detection overlay -->
+            <div class="col-md-8">
+              <div class="card">
+                <div class="card-header d-flex align-items-center gap-3 py-2">
+                  <button class="btn btn-outline-info btn-sm" id="btn-vis-refresh"
+                          data-bs-toggle="tooltip" title="Reload the camera frame + detected objects.">
+                    <i class="bi bi-camera"></i> Refresh
+                  </button>
+                  <div class="form-check form-check-sm m-0">
+                    <input class="form-check-input" type="checkbox" id="vis-show-objects" checked>
+                    <label class="form-check-label small" for="vis-show-objects">Objects</label>
+                  </div>
+                  <div class="form-check form-check-sm m-0">
+                    <input class="form-check-input" type="checkbox" id="vis-show-grid">
+                    <label class="form-check-label small" for="vis-show-grid"
+                           data-bs-toggle="tooltip" title="Project a table-plane grid onto the camera view to visualize the calibration.">Grid</label>
+                  </div>
+                  <small class="text-muted ms-auto">
+                    Pixel: <span id="vis-pixel" class="text-info">--</span>
+                  </small>
+                </div>
+                <div class="card-body p-2">
+                  <div id="vis-camera-container" style="position:relative; width:100%; overflow:hidden;">
+                    <img id="vis-camera-feed" src="" alt="Camera view"
+                         class="img-fluid rounded" style="cursor:crosshair; display:none; width:100%;">
+                    <canvas id="vis-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right rail: target + preview + controls -->
+            <div class="col-md-4">
+
+              <!-- Pick target + full preview -->
+              <div class="card mb-2">
+                <div class="card-header py-2">
+                  <i class="bi bi-hand-index-thumb"></i> Pick target
+                </div>
+                <div class="card-body py-2">
+                  <div id="vis-target-hint" class="small text-muted mb-2">
+                    Click a detected object or any pixel in the camera view.
+                  </div>
+                  <div id="vis-preview" class="small" style="display:none;">
+                    <h6 class="small text-muted mt-1 mb-1">Target</h6>
+                    <table class="table table-sm table-borderless mb-1 info-table">
+                      <tr><td class="text-muted">Pixel</td><td id="vis-p-pixel">--</td></tr>
+                      <tr data-bs-toggle="tooltip" data-bs-html="true"
+                          title="<b>Ray-projected XY</b> — computed by casting a ray from the camera through the pixel and intersecting the table plane. No depth used.">
+                        <td class="text-muted">Robot XY</td><td id="vis-p-robot-xy">--</td></tr>
+                      <tr data-bs-toggle="tooltip" data-bs-html="true"
+                          title="<b>Table rotation</b> — the object's image-plane rotation corrected for perspective distortion. The image value is shown for comparison.">
+                        <td class="text-muted">Rotation</td><td id="vis-p-rotation">--</td></tr>
+                    </table>
+                    <h6 class="small text-muted mt-1 mb-1">Depth checks</h6>
+                    <table class="table table-sm table-borderless mb-1 info-table">
+                      <tr data-bs-toggle="tooltip" title="Is something above the table surface at this pixel? (depth < expected table depth)">
+                        <td class="text-muted">Present</td><td id="vis-p-present">--</td></tr>
+                      <tr data-bs-toggle="tooltip" title="Estimated height above table from depth delta. Used to adjust grasp Z for tall objects.">
+                        <td class="text-muted">Height</td><td id="vis-p-height">--</td></tr>
+                      <tr><td class="text-muted">Expected depth</td><td id="vis-p-exp-depth">--</td></tr>
+                      <tr><td class="text-muted">Measured depth</td><td id="vis-p-meas-depth">--</td></tr>
+                    </table>
+                    <h6 class="small text-muted mt-1 mb-1">Confidence</h6>
+                    <div class="d-flex align-items-center gap-2 mb-1">
+                      <span id="vis-p-conf-badge" class="badge bg-secondary">--</span>
+                      <span id="vis-p-conf-detail" class="small text-muted">--</span>
+                    </div>
+                    <h6 class="small text-muted mt-1 mb-1">Waypoints</h6>
+                    <table class="table table-sm table-borderless mb-1 info-table">
+                      <tr><td class="text-muted">Approach</td><td id="vis-p-approach">--</td></tr>
+                      <tr><td class="text-muted">Grasp</td><td id="vis-p-grasp">--</td></tr>
+                      <tr><td class="text-muted">Retract</td><td id="vis-p-retract">--</td></tr>
+                    </table>
+                    <div id="vis-p-warnings" class="text-warning small mb-2" style="display:none;"></div>
+                    <div class="d-flex gap-2">
+                      <button class="btn btn-outline-info btn-sm flex-fill" id="btn-vis-simulate"
+                              data-bs-toggle="tooltip" data-bs-html="true"
+                              title="<b>Simulate in 3D.</b><br>Computes joint angles via InverseKin (no motion) and animates the pick in the 3D view. Requires robot enabled (mode 5).">
+                        <i class="bi bi-badge-3d"></i> Simulate
+                      </button>
+                      <button class="btn btn-success btn-sm flex-fill" id="btn-vis-execute"
+                              data-bs-toggle="tooltip" data-bs-html="true"
+                              title="<b>Execute the pick for real.</b><br>Open gripper → approach → descend → close → retract. Blocked if confidence is RED.">
+                        <i class="bi bi-play-fill"></i> Pick
+                      </button>
+                      <button class="btn btn-outline-secondary btn-sm" id="btn-vis-cancel">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Pick settings -->
+              <div class="card mb-2">
+                <div class="card-header py-2" data-bs-toggle="collapse" data-bs-target="#vis-pick-settings" role="button">
+                  <i class="bi bi-sliders"></i> Pick settings
+                  <i class="bi bi-chevron-down float-end panel-chevron"></i>
+                </div>
+                <div class="collapse" id="vis-pick-settings">
+                  <div class="card-body py-2">
+                    <div class="row g-2">
+                      <div class="col-6">
+                        <label class="form-label small mb-0" data-bs-toggle="tooltip"
+                               title="Height above grasp Z to start the approach.">Approach (mm)</label>
+                        <input type="number" class="form-control form-control-sm" id="vis-approach-mm" value="100" min="20" max="300">
+                      </div>
+                      <div class="col-6">
+                        <label class="form-label small mb-0" data-bs-toggle="tooltip"
+                               title="Extra clearance above table Z at grasp. Actual grasp Z = max(this, object_height/2).">Grasp clearance (mm)</label>
+                        <input type="number" class="form-control form-control-sm" id="vis-grasp-mm" value="5" min="0" max="100">
+                      </div>
+                      <div class="col-6">
+                        <label class="form-label small mb-0" data-bs-toggle="tooltip"
+                               title="How high to lift after grasping.">Lift (mm)</label>
+                        <input type="number" class="form-control form-control-sm" id="vis-lift-mm" value="150" min="20" max="400">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Step-by-step plan (shown during simulate/execute) -->
+              <div class="card mb-2" id="vis-plan-card" style="display:none;">
+                <div class="card-header py-2">
+                  <i class="bi bi-list-ol"></i> Execution plan
+                </div>
+                <div class="card-body py-2">
+                  <ol id="vis-plan-steps" class="small mb-0 ps-3"></ol>
+                </div>
+              </div>
             </div>
           </div>
         </div>

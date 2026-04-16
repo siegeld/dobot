@@ -1040,6 +1040,302 @@ async def save_camera(request: dict):
         return {"success": False, "error": str(e)}
 
 
+# ── Vision (ray-plane projection + pick planning) ───────────────
+#
+# Uses VisionTransform for precise pixel-to-table projection (no depth
+# for XY). Depth is used only for sanity checks (object presence, height).
+# See vision_transform.py for the math.
+
+_VISION_CAL_FILE = Path(__file__).parent / "vision_calibration.json"
+_vision_transform = None
+
+
+def _get_vision_transform():
+    global _vision_transform
+    if _vision_transform is None and _VISION_CAL_FILE.exists():
+        try:
+            from dobot_ros.vision_transform import VisionTransform
+            _vision_transform = VisionTransform.load(_VISION_CAL_FILE)
+        except Exception as e:
+            logging.warning("Failed to load vision calibration: %s", e)
+    return _vision_transform
+
+
+@app.get("/api/vision/status")
+async def vision_status():
+    """Vision system status: calibration loaded, table Z, intrinsics."""
+    vt = _get_vision_transform()
+    return {
+        "calibrated": vt is not None,
+        "table_z": vt.table_z if vt else _get_table_z(),
+        "min_clearance_mm": vt.min_clearance_mm if vt else _get_min_clearance_mm(),
+        "intrinsics": vt.intrinsics.to_dict() if vt else None,
+        "calibration_file": str(_VISION_CAL_FILE),
+    }
+
+
+@app.post("/api/vision/calibrate")
+async def vision_calibrate():
+    """Solve the vision transform from the existing camera-server calibration
+    points + camera intrinsics. Stores vision_calibration.json on the robot side.
+
+    Requires: ≥3 calibration points on the camera server, table Z recorded.
+    """
+    global _vision_transform
+    import requests
+    try:
+        from dobot_ros.vision_transform import VisionTransform, CameraIntrinsics
+
+        # 1. Get calibration points from camera server.
+        cal = requests.get(f"{CAMERA_URL}/api/calibration", timeout=5).json()
+        points = cal.get("points", [])
+        if len(points) < 3:
+            return JSONResponse(status_code=400,
+                content={"success": False, "error": f"need ≥3 calibration points, have {len(points)}"})
+
+        # 2. Get camera intrinsics (try camera server first, fall back to defaults).
+        intrinsics = None
+        try:
+            intr_resp = requests.get(f"{CAMERA_URL}/api/intrinsics", timeout=3)
+            if intr_resp.status_code == 200:
+                intr_data = intr_resp.json()
+                intrinsics = CameraIntrinsics.from_dict(intr_data)
+        except Exception:
+            pass
+        if intrinsics is None:
+            # D435 defaults at 640×360
+            intrinsics = CameraIntrinsics(fx=615.0, fy=615.0, cx=320.0, cy=180.0,
+                                          width=640, height=360)
+            logging.info("Using default D435 intrinsics (camera server didn't provide /api/intrinsics)")
+
+        # 3. Table Z.
+        table_z = _get_table_z()
+        if table_z is None:
+            return JSONResponse(status_code=400,
+                content={"success": False, "error": "table Z not calibrated — record it first"})
+
+        # 4. Solve.
+        vt, error_mm = VisionTransform.solve_from_points(
+            correspondences=points,
+            intrinsics=intrinsics,
+            table_z=table_z,
+            min_clearance_mm=_get_min_clearance_mm(),
+        )
+
+        # 5. Save.
+        vt.save(_VISION_CAL_FILE)
+        _vision_transform = vt
+
+        return {
+            "success": True,
+            "error_mm": round(error_mm, 2),
+            "num_points": len(points),
+            "intrinsics": intrinsics.to_dict(),
+            "table_z": table_z,
+        }
+    except Exception as e:
+        logging.exception("vision calibrate failed")
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.post("/api/vision/plan")
+async def vision_plan(req: PickPlanRequest):
+    """Plan a pick using ray-plane projection (no depth for XY).
+
+    Returns the full preview: projected table XY, corrected rotation,
+    depth sanity checks, confidence score, waypoints, and pixel coords
+    for overlay visualization.
+    """
+    import requests
+    try:
+        vt = _get_vision_transform()
+        if vt is None:
+            return JSONResponse(status_code=400,
+                content={"success": False, "error": "vision not calibrated — run calibrate first"})
+
+        obj = None
+        center_px, center_py = None, None
+        image_rot_deg = 0.0
+        depth_mean_m = None
+        depth_stddev_mm = 0.0
+        frames_tracked = 0
+        area_px = 0
+
+        if req.object_id is not None:
+            objs = requests.get(f"{CAMERA_URL}/api/detection/objects", timeout=3).json()
+            for o in objs.get("objects", []):
+                if o.get("id") == req.object_id:
+                    obj = o
+                    center_px, center_py = o["center_px"]
+                    image_rot_deg = float(o.get("rotation_deg", 0.0))
+                    depth_mean_m = float(o.get("depth_mean", 0))
+                    area_px = int(o.get("area_px", 0))
+                    frames_tracked = int(o.get("frames_tracked", 0))
+                    break
+            if obj is None:
+                return JSONResponse(status_code=404,
+                    content={"success": False, "error": f"object {req.object_id} not found"})
+        elif req.px is not None and req.py is not None:
+            center_px, center_py = req.px, req.py
+            try:
+                depth_resp = requests.get(f"{CAMERA_URL}/api/depth/at",
+                    params={"x": req.px, "y": req.py}, timeout=3).json()
+                depth_mean_m = float(depth_resp.get("distance", 0))
+            except Exception:
+                pass
+        else:
+            return JSONResponse(status_code=400,
+                content={"success": False, "error": "provide object_id or (px, py)"})
+
+        # Ray-plane projection for XY (no depth needed).
+        robot_x, robot_y = vt.pixel_to_table(center_px, center_py)
+
+        # Perspective-corrected rotation.
+        table_rot_deg = vt.image_rot_to_table_rot(image_rot_deg, center_px, center_py)
+
+        # Depth sanity checks.
+        expected_depth_m = vt.expected_depth_at_pixel(center_px, center_py)
+        object_present = depth_mean_m is not None and depth_mean_m > 0 and \
+            (expected_depth_m - depth_mean_m) > 0.005  # >5mm above table
+        object_height_mm = vt.object_height_mm(expected_depth_m, depth_mean_m) \
+            if depth_mean_m and depth_mean_m > 0 else 0.0
+
+        # Workspace check.
+        from dobot_ros.vla.safety import SafetyLimits
+        limits = SafetyLimits()
+        in_workspace = (limits.x_min <= robot_x <= limits.x_max and
+                        limits.y_min <= robot_y <= limits.y_max)
+
+        # Confidence.
+        confidence = vt.pick_confidence(
+            object_present=object_present,
+            depth_consistency_mm=depth_stddev_mm if depth_stddev_mm else 10.0,
+            frames_tracked=frames_tracked,
+            in_workspace=in_workspace,
+            area_px=area_px if area_px else 500,
+        )
+
+        # Compute waypoints.
+        grasp_z_offset = max(req.grasp_clearance_mm, vt.min_clearance_mm)
+        if object_present and object_height_mm > 10:
+            # Grasp at object midheight instead of table surface.
+            grasp_z_offset = max(grasp_z_offset, object_height_mm / 2.0)
+
+        approach, grasp, retract, _, _ = _compute_pick_waypoints(
+            robot_x=robot_x, robot_y=robot_y,
+            rotation_deg=table_rot_deg,
+            approach_mm=req.approach_mm,
+            grasp_clearance_mm=grasp_z_offset,
+            lift_mm=req.lift_mm,
+        )
+
+        # Pixel coords for overlay visualization (project waypoints back to image).
+        overlay_px = {}
+        for name, wp in [("approach", approach), ("grasp", grasp), ("retract", retract)]:
+            try:
+                opx, opy = vt.robot_to_pixel(wp[0], wp[1], wp[2])
+                overlay_px[name] = [round(opx, 1), round(opy, 1)]
+            except Exception:
+                pass
+        target_px, target_py = vt.robot_to_pixel(robot_x, robot_y)
+        overlay_px["target"] = [round(target_px, 1), round(target_py, 1)]
+
+        warnings = []
+        if not object_present:
+            warnings.append("depth check: no object detected above the table at this pixel")
+        if not in_workspace:
+            warnings.append(f"target ({robot_x:.0f}, {robot_y:.0f}) is outside workspace bounds")
+        if grasp[2] < vt.table_z - 1:
+            warnings.append(f"grasp Z {grasp[2]:.1f} below table Z {vt.table_z:.1f}")
+
+        return {
+            "success": True,
+            "target": {
+                "pixel": [center_px, center_py],
+                "robot_xy": [round(robot_x, 1), round(robot_y, 1)],
+                "table_rot_deg": round(table_rot_deg, 1),
+                "image_rot_deg": round(image_rot_deg, 1),
+                "object": obj,
+            },
+            "depth_check": {
+                "object_present": object_present,
+                "object_height_mm": round(object_height_mm, 1),
+                "expected_depth_m": round(expected_depth_m, 3),
+                "measured_depth_m": round(depth_mean_m, 3) if depth_mean_m else None,
+            },
+            "confidence": confidence.to_dict(),
+            "waypoints": {
+                "approach": [round(v, 1) for v in approach],
+                "grasp": [round(v, 1) for v in grasp],
+                "retract": [round(v, 1) for v in retract],
+            },
+            "overlay_pixels": overlay_px,
+            "warnings": warnings,
+        }
+    except Exception as e:
+        logging.exception("vision plan failed")
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.post("/api/vision/execute")
+async def vision_execute(req: PickExecuteRequest):
+    """Execute a pick planned via ray-plane projection. Re-plans internally
+    to use fresh detection data. Requires confirm=true."""
+    if not req.confirm:
+        return JSONResponse(status_code=400,
+            content={"success": False, "error": "pass confirm=true to execute"})
+
+    # Re-plan with vision pipeline.
+    plan_req = PickPlanRequest(**{k: getattr(req, k) for k in PickPlanRequest.model_fields.keys()})
+    plan_resp = await vision_plan(plan_req)
+    if isinstance(plan_resp, JSONResponse):
+        return plan_resp
+    if not plan_resp.get("success"):
+        return JSONResponse(status_code=400, content=plan_resp)
+
+    # Check confidence — refuse if red.
+    conf = plan_resp.get("confidence", {})
+    if conf.get("level") == "red":
+        return JSONResponse(status_code=409, content={
+            "success": False,
+            "error": "pick confidence is RED — too risky to execute",
+            "confidence": conf,
+        })
+
+    try:
+        import time as _time
+        wp = plan_resp["waypoints"]
+        approach, grasp, retract = wp["approach"], wp["grasp"], wp["retract"]
+        client = _get_client()
+
+        logging.info("vision pick: opening gripper")
+        try:
+            client.gripper_move(800, force=50, speed=50, wait=True)
+        except Exception as e:
+            logging.warning("gripper open failed (continuing): %s", e)
+
+        logging.info("vision pick: approach %s", approach)
+        client.move_pose(approach)
+
+        logging.info("vision pick: descend to grasp %s", grasp)
+        client.move_pose(grasp)
+        _time.sleep(0.2)
+
+        logging.info("vision pick: closing gripper")
+        try:
+            client.gripper_move(200, force=50, speed=50, wait=True)
+        except Exception as e:
+            logging.warning("gripper close failed: %s", e)
+
+        logging.info("vision pick: retract %s", retract)
+        client.move_pose(retract)
+
+        return {"success": True, "waypoints": wp, "target": plan_resp["target"]}
+    except Exception as e:
+        logging.exception("vision execute failed")
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
 # ── Inverse Kinematics (query-only, no motion) ──────────────────
 
 class InverseKinRequest(BaseModel):

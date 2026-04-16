@@ -305,32 +305,43 @@ function onResize(container) {
 
 function buildGripper(parent) {
   gripperGroup = new THREE.Group();
-  // Offset from flange along local Z (URDF Z, which is the tool axis).
-  // In the URDF chain's local frame after joint6, +Z points out the flange.
-  gripperGroup.position.set(0, 0, 0.06); // mount surface offset
+  // Flush against the Link6 flange face. The joint6 pivot is at the
+  // origin; the Link6 mesh extends a short distance in +Z. Setting
+  // the gripper origin at Z=0 (or a tiny nudge) seats it flush.
+  gripperGroup.position.set(0, 0, 0);
 
+  // Colors match the wrist/Link6 scheme so it looks integrated, not floating.
   const bodyMat = new THREE.MeshStandardMaterial({
-    color: 0x3a3a40, metalness: 0.5, roughness: 0.4,
+    color: 0xb0b0b8, metalness: 0.35, roughness: 0.4,
   });
   const fingerMat = new THREE.MeshStandardMaterial({
-    color: 0x5a5a64, metalness: 0.4, roughness: 0.35,
+    color: 0xc8c8d0, metalness: 0.3, roughness: 0.35,
   });
 
-  // Gripper body (housing)
-  const bodyGeo = new THREE.BoxGeometry(0.06, 0.04, 0.10);
+  // AG-105 dimensions: 203mm flange-to-tip total.
+  // Mounting adapter: ~15mm, body/housing: ~100mm, fingers: ~88mm.
+
+  // Mounting plate (thin disc flush to flange)
+  const plateGeo = new THREE.CylinderGeometry(0.028, 0.028, 0.015, 16);
+  const plate = new THREE.Mesh(plateGeo, bodyMat);
+  plate.rotation.x = Math.PI / 2;
+  plate.position.set(0, 0, 0.0075);
+  gripperGroup.add(plate);
+
+  // Gripper body (housing) — 100mm long
+  const bodyGeo = new THREE.BoxGeometry(0.055, 0.038, 0.10);
   const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.position.set(0, 0, 0.05);
+  body.position.set(0, 0, 0.065);
   gripperGroup.add(body);
 
-  // Left finger
-  const fingerGeo = new THREE.BoxGeometry(0.012, 0.025, 0.07);
+  // Fingers — 88mm long, tips reach Z=0.203 (203mm total)
+  const fingerGeo = new THREE.BoxGeometry(0.010, 0.022, 0.088);
   gripperFingerL = new THREE.Mesh(fingerGeo, fingerMat);
-  gripperFingerL.position.set(-0.005, 0, 0.135);
+  gripperFingerL.position.set(-0.005, 0, 0.159);
   gripperGroup.add(gripperFingerL);
 
-  // Right finger
   gripperFingerR = new THREE.Mesh(fingerGeo, fingerMat);
-  gripperFingerR.position.set(0.005, 0, 0.135);
+  gripperFingerR.position.set(0.005, 0, 0.159);
   gripperGroup.add(gripperFingerR);
 
   parent.add(gripperGroup);
@@ -340,8 +351,9 @@ function animateGripperFingers() {
   if (!gripperFingerL || !gripperFingerR) return;
   // Lerp toward target spread for smooth animation.
   gripperCurrentSpread += (gripperTargetSpread - gripperCurrentSpread) * 0.15;
-  gripperFingerL.position.x = -0.005 - gripperCurrentSpread;
-  gripperFingerR.position.x = 0.005 + gripperCurrentSpread;
+  // Fingers slide apart symmetrically in ±X from center.
+  gripperFingerL.position.x = -(0.005 + gripperCurrentSpread);
+  gripperFingerR.position.x =  (0.005 + gripperCurrentSpread);
 }
 
 
