@@ -20,7 +20,7 @@ def validate_finite(values: List[float], label: str = "values"):
 def validate_pose_bounds(pose: List[float]):
     """Sanity-check a cartesian pose against hard physical limits."""
     MAX_XY = 1500.0
-    MIN_Z = -200.0
+    MIN_Z = -50.0     # mm — the wrist should almost never go below the base plane
     MAX_Z = 1500.0
     MAX_ROT = 360.0
     labels = ["X", "Y", "Z", "RX", "RY", "RZ"]

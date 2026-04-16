@@ -1963,7 +1963,17 @@
     const stratName = plan.strategy?.name || _visState.activeSlug || '?';
     const planCard = document.querySelector('#vis-preview')?.closest('.card');
     const planHeader = planCard?.querySelector('.card-header');
-    if (planHeader) planHeader.innerHTML = `<i class="bi bi-hand-index-thumb"></i> Pick target <span class="badge bg-info ms-2">${stratName}</span>`;
+    if (planHeader) {
+      planHeader.textContent = '';
+      const icon = document.createElement('i');
+      icon.className = 'bi bi-hand-index-thumb';
+      const badge = document.createElement('span');
+      badge.className = 'badge bg-info ms-2';
+      badge.textContent = stratName;
+      planHeader.appendChild(icon);
+      planHeader.appendChild(document.createTextNode(' Pick target '));
+      planHeader.appendChild(badge);
+    }
 
     $('vis-p-pixel').textContent = t.pixel ? `(${t.pixel[0]}, ${t.pixel[1]})` : '--';
     $('vis-p-robot-xy').textContent = t.robot_xy ? `(${t.robot_xy[0]}, ${t.robot_xy[1]}) mm` : '--';

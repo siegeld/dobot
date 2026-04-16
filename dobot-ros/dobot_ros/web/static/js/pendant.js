@@ -38,11 +38,18 @@
     const toast = document.createElement('div');
     toast.className = `toast align-items-center ${colors[type] || colors.info} border-0`;
     toast.setAttribute('role', 'alert');
-    toast.innerHTML = `
-      <div class="d-flex">
-        <div class="toast-body">${message}</div>
-        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
-      </div>`;
+    const d = document.createElement('div');
+    d.className = 'd-flex';
+    const body = document.createElement('div');
+    body.className = 'toast-body';
+    body.textContent = message;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-close btn-close-white me-2 m-auto';
+    btn.setAttribute('data-bs-dismiss', 'toast');
+    d.appendChild(body);
+    d.appendChild(btn);
+    toast.appendChild(d);
     container.appendChild(toast);
     const bsToast = new bootstrap.Toast(toast, { delay: 3000 });
     bsToast.show();

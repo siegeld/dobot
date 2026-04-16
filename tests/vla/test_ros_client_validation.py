@@ -40,7 +40,7 @@ class TestValidatePoseBounds:
 
     def test_rejects_z_below_floor(self):
         with pytest.raises(ValueError, match="Z=.*below"):
-            validate_pose_bounds([0, 0, -500, 0, 0, 0])
+            validate_pose_bounds([0, 0, -100, 0, 0, 0])
 
     def test_rejects_z_above_ceiling(self):
         with pytest.raises(ValueError, match="Z=.*ceiling"):
@@ -54,11 +54,11 @@ class TestValidatePoseBounds:
         validate_pose_bounds([400, -200, 300, 180, 0, 45])
 
     def test_accepts_negative_z_within_floor(self):
-        validate_pose_bounds([0, 0, -100, 0, 0, 0])
+        validate_pose_bounds([0, 0, -30, 0, 0, 0])
 
     def test_accepts_boundary_values(self):
         validate_pose_bounds([1500, -1500, 1500, 360, -360, 360])
-        validate_pose_bounds([0, 0, -200, 0, 0, 0])
+        validate_pose_bounds([0, 0, -50, 0, 0, 0])
 
 
 class TestValidateJointBounds:

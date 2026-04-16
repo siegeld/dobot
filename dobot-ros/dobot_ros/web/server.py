@@ -64,13 +64,16 @@ _last_motion_time = 0.0
 _MOTION_MIN_INTERVAL = 0.15  # seconds between motion commands
 
 
+_throttle_lock = threading.Lock()
+
 def _throttle_motion() -> Optional[str]:
     """Returns an error string if a motion command was sent too recently."""
     global _last_motion_time
-    now = time.time()
-    if now - _last_motion_time < _MOTION_MIN_INTERVAL:
-        return "motion command too fast — wait before sending another"
-    _last_motion_time = now
+    with _throttle_lock:
+        now = time.time()
+        if now - _last_motion_time < _MOTION_MIN_INTERVAL:
+            return "motion command too fast — wait before sending another"
+        _last_motion_time = now
     return None
 
 
@@ -257,7 +260,7 @@ async def get_position():
 
 
 @app.post("/api/enable")
-async def enable_robot():
+def enable_robot():
     """Enable the robot."""
     try:
         client = _get_client()
@@ -276,7 +279,7 @@ async def enable_robot():
 
 
 @app.post("/api/disable")
-async def disable_robot():
+def disable_robot():
     """Disable the robot."""
     try:
         client = _get_client()
@@ -287,7 +290,7 @@ async def disable_robot():
 
 
 @app.post("/api/clear")
-async def clear_error():
+def clear_error():
     """Clear robot errors."""
     try:
         client = _get_client()
@@ -298,7 +301,7 @@ async def clear_error():
 
 
 @app.post("/api/stop")
-async def stop_robot():
+def stop_robot():
     """Emergency stop."""
     try:
         client = _get_client()
@@ -309,7 +312,7 @@ async def stop_robot():
 
 
 @app.post("/api/drag/start")
-async def start_drag():
+def start_drag():
     """Enter drag/freedrive mode."""
     try:
         client = _get_client()
@@ -320,7 +323,7 @@ async def start_drag():
 
 
 @app.post("/api/drag/stop")
-async def stop_drag():
+def stop_drag():
     """Exit drag/freedrive mode."""
     try:
         client = _get_client()
@@ -331,7 +334,7 @@ async def stop_drag():
 
 
 @app.post("/api/speed")
-async def set_speed(req: SpeedRequest):
+def set_speed(req: SpeedRequest):
     """Set global speed factor. Also persists to the settings store so the
     value survives container restarts."""
     try:
@@ -349,7 +352,7 @@ async def set_speed(req: SpeedRequest):
 
 
 @app.post("/api/jog")
-async def jog_robot(req: JogRequest):
+def jog_robot(req: JogRequest):
     """Jog robot by relative distance."""
     try:
         throttled = _throttle_motion()
@@ -383,7 +386,7 @@ async def jog_robot(req: JogRequest):
 
 
 @app.post("/api/move_joints")
-async def move_joints(req: MoveJointsRequest):
+def move_joints(req: MoveJointsRequest):
     """Move to absolute joint positions."""
     try:
         if len(req.angles) != 6:
@@ -398,7 +401,7 @@ async def move_joints(req: MoveJointsRequest):
 # ── Gripper API ─────────────────────────────────────────────────
 
 @app.post("/api/gripper/init")
-async def gripper_init():
+def gripper_init():
     """Initialize the gripper."""
     try:
         client = _get_client()
@@ -411,7 +414,7 @@ async def gripper_init():
 
 
 @app.post("/api/gripper/open")
-async def gripper_open(speed: int = 100, force: int = 20):
+def gripper_open(speed: int = 100, force: int = 20):
     """Open the gripper (fire-and-forget, state updates via WebSocket)."""
     try:
         client = _get_client()
@@ -422,7 +425,7 @@ async def gripper_open(speed: int = 100, force: int = 20):
 
 
 @app.post("/api/gripper/close")
-async def gripper_close(speed: int = 100, force: int = 20):
+def gripper_close(speed: int = 100, force: int = 20):
     """Close the gripper (fire-and-forget, state updates via WebSocket)."""
     try:
         client = _get_client()
@@ -433,7 +436,7 @@ async def gripper_close(speed: int = 100, force: int = 20):
 
 
 @app.post("/api/gripper/move")
-async def gripper_move(req: GripperMoveRequest):
+def gripper_move(req: GripperMoveRequest):
     """Move gripper to position (fire-and-forget, state updates via WebSocket)."""
     try:
         client = _get_client()
@@ -444,7 +447,7 @@ async def gripper_move(req: GripperMoveRequest):
 
 
 @app.get("/api/gripper/status")
-async def gripper_status():
+def gripper_status():
     """Get gripper status."""
     with _lock:
         return {
@@ -486,7 +489,7 @@ CAMERA_URL = os.environ.get("CAMERA_URL", "http://10.11.6.65:8080")
 
 
 @app.get("/api/calibration/status")
-async def calibration_status():
+def calibration_status():
     """Get calibration status from camera server."""
     try:
         import requests
@@ -497,7 +500,7 @@ async def calibration_status():
 
 
 @app.post("/api/calibration/record")
-async def calibration_record(req: dict = None):
+def calibration_record(req: dict = None):
     """Record a calibration point: robot XYZ + camera 3D at pixel (px, py).
 
     If px/py provided, uses depth at that pixel. Otherwise uses frame center.
@@ -561,7 +564,7 @@ async def calibration_record(req: dict = None):
 
 
 @app.post("/api/calibration/solve")
-async def calibration_solve():
+def calibration_solve():
     """Solve the camera-to-robot transform."""
     try:
         import requests
@@ -572,7 +575,7 @@ async def calibration_solve():
 
 
 @app.post("/api/calibration/clear")
-async def calibration_clear():
+def calibration_clear():
     """Clear all calibration points."""
     try:
         import requests
@@ -583,7 +586,7 @@ async def calibration_clear():
 
 
 @app.post("/api/calibration/delete-point")
-async def calibration_delete_point(req: dict):
+def calibration_delete_point(req: dict):
     """Delete a calibration point by index. Re-creates remaining points."""
     import requests as rq
     try:
@@ -605,7 +608,7 @@ async def calibration_delete_point(req: dict):
 
 
 @app.get("/api/calibration/test")
-async def calibration_test():
+def calibration_test():
     """Test calibration: for each detected object, show predicted robot coords."""
     import requests
     try:
@@ -647,7 +650,7 @@ async def calibration_test():
 
 
 @app.get("/api/calibration/camera-frame")
-async def calibration_camera_frame():
+def calibration_camera_frame():
     """Proxy the detection frame from camera server."""
     import requests
     from fastapi.responses import Response
@@ -662,7 +665,7 @@ _TABLE_FILE = Path(__file__).parent / "table_plane.json"
 
 
 @app.get("/api/calibration/table")
-async def get_table():
+def get_table():
     """Get saved table plane data."""
     try:
         if _TABLE_FILE.exists():
@@ -673,7 +676,7 @@ async def get_table():
 
 
 @app.post("/api/calibration/table/clearance")
-async def set_table_clearance(req: dict):
+def set_table_clearance(req: dict):
     """Set minimum clearance above table in mm."""
     try:
         data = json.loads(_TABLE_FILE.read_text()) if _TABLE_FILE.exists() else {"points": [], "plane": None}
@@ -685,7 +688,7 @@ async def set_table_clearance(req: dict):
 
 
 @app.post("/api/calibration/table/point")
-async def add_table_point():
+def add_table_point():
     """Record a table point from current robot Z position."""
     try:
         client = _get_client()
@@ -722,7 +725,7 @@ async def add_table_point():
 
 
 @app.post("/api/calibration/table/z")
-async def set_table_z():
+def set_table_z():
     """Record the current wrist Z as the table floor (single-touch calibration).
 
     This is the simpler, preferred workflow: touch the gripper tip to any point
@@ -746,7 +749,7 @@ async def set_table_z():
 
 
 @app.post("/api/calibration/table/clear")
-async def clear_table():
+def clear_table():
     """Clear table plane data (both single-Z and multi-point schemas)."""
     try:
         _atomic_write(_TABLE_FILE, json.dumps({"points": [], "plane": None}))
@@ -785,10 +788,6 @@ def _get_min_clearance_mm() -> float:
 def workspace_move(req: dict):
     """Move robot to a workspace position (center or corner) at given height above table."""
     try:
-        blocked = _check_motion_free("workspace_move")
-        if blocked:
-            return {"success": False, "error": blocked}
-
         data = json.loads(_TABLE_FILE.read_text()) if _TABLE_FILE.exists() else {}
         pts = data.get("points", [])
         plane = data.get("plane")
@@ -796,7 +795,7 @@ def workspace_move(req: dict):
             return {"success": False, "error": "Need at least 3 table points"}
 
         pos = req.get("position", "center")
-        height_mm = max(0, min(500, float(req.get("height_mm", 127))))  # clamp to safe range
+        height_mm = max(0, min(500, float(req.get("height_mm", 127))))
 
         import numpy as np
         pts_arr = np.array(pts)
@@ -811,14 +810,16 @@ def workspace_move(req: dict):
         else:
             return {"success": False, "error": f"Unknown position: {pos}"}
 
-        # Compute table Z at this XY using plane equation
         normal = np.array(plane["normal"])
         d = plane["d"]
         if abs(normal[2]) < 0.01:
             return {"success": False, "error": "plane normal Z component too small — recalibrate"}
-        # ax + by + cz + d = 0 => z = -(ax + by + d) / c
         table_z = -(normal[0] * target_xy[0] + normal[1] * target_xy[1] + d) / normal[2]
         target_z = table_z + height_mm
+
+        blocked = _acquire_motion("workspace_move")
+        if blocked:
+            return {"success": False, "error": blocked}
 
         client = _get_client()
         client.set_speed_factor(5)
@@ -850,10 +851,15 @@ def workspace_move(req: dict):
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+    finally:
+        try:
+            _release_motion()
+        except Exception:
+            pass
 
 
 @app.get("/api/calibration/depth-at")
-async def calibration_depth_at(x: int, y: int):
+def calibration_depth_at(x: int, y: int):
     """Get depth at a pixel from camera server."""
     import requests
     try:
@@ -871,7 +877,7 @@ async def calibration_depth_at(x: int, y: int):
 # then call /api/pick/execute to actually run.
 
 @app.get("/api/detection/objects")
-async def detection_objects():
+def detection_objects():
     """Proxy the camera server's object detection."""
     import requests
     try:
@@ -1028,23 +1034,22 @@ def pick_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool s
     """Execute a full pick sequence: approach → grasp → retract.
     The client must send confirm=true — a safety interlock so an errant POST
     can't launch the robot."""
-    blocked = _check_motion_free("pick")
-    if blocked:
-        return JSONResponse(status_code=409, content={"success": False, "error": blocked})
     if not req.confirm:
         return JSONResponse(status_code=400,
             content={"success": False, "error": "pass confirm=true to execute"})
 
-    plan_req = PickPlanRequest(**{k: getattr(req, k) for k in PickPlanRequest.model_fields.keys()})
-    plan_resp = pick_plan(plan_req)
-    if isinstance(plan_resp, JSONResponse):
-        return plan_resp
-    if not plan_resp.get("success"):
-        return JSONResponse(status_code=400, content=plan_resp)
+    blocked = _acquire_motion("pick")
+    if blocked:
+        return JSONResponse(status_code=409, content={"success": False, "error": blocked})
 
-    _set_motion_active("pick")
     client = _get_client()
     try:
+        plan_req = PickPlanRequest(**{k: getattr(req, k) for k in PickPlanRequest.model_fields.keys()})
+        plan_resp = pick_plan(plan_req)
+        if isinstance(plan_resp, JSONResponse):
+            return plan_resp
+        if not plan_resp.get("success"):
+            return JSONResponse(status_code=400, content=plan_resp)
         import time as _time
         wp = plan_resp["waypoints"]
         approach, grasp, retract = wp["approach"], wp["grasp"], wp["retract"]
@@ -1080,12 +1085,11 @@ def pick_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool s
         logging.exception("pick execute failed")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
     finally:
-        # SAFETY: always halt the robot and release the motion lock on exit.
         try:
             client.stop()
         except Exception:
             pass
-        _set_motion_active(None)
+        _release_motion()
 
 
 # ── Camera State ─────────────────────────────────────────────────
@@ -1229,7 +1233,7 @@ async def vision_grid():
 
 
 @app.post("/api/vision/calibrate")
-async def vision_calibrate():
+def vision_calibrate():
     """Solve the vision transform from the existing camera-server calibration
     points + camera intrinsics. Stores vision_calibration.json on the robot side.
 
@@ -1461,31 +1465,30 @@ def vision_plan(req: PickPlanRequest):
 def vision_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool
     """Execute a pick planned via ray-plane projection. Re-plans internally
     to use fresh detection data. Requires confirm=true."""
-    blocked = _check_motion_free("pick")
-    if blocked:
-        return JSONResponse(status_code=409, content={"success": False, "error": blocked})
     if not req.confirm:
         return JSONResponse(status_code=400,
             content={"success": False, "error": "pass confirm=true to execute"})
 
-    plan_req = PickPlanRequest(**{k: getattr(req, k) for k in PickPlanRequest.model_fields.keys()})
-    plan_resp = vision_plan(plan_req)
-    if isinstance(plan_resp, JSONResponse):
-        return plan_resp
-    if not plan_resp.get("success"):
-        return JSONResponse(status_code=400, content=plan_resp)
+    blocked = _acquire_motion("pick")
+    if blocked:
+        return JSONResponse(status_code=409, content={"success": False, "error": blocked})
 
-    conf = plan_resp.get("confidence", {})
-    if conf.get("level") == "red":
-        return JSONResponse(status_code=409, content={
-            "success": False,
-            "error": "pick confidence is RED — too risky to execute",
-            "confidence": conf,
-        })
-
-    _set_motion_active("pick")
     client = _get_client()
     try:
+        plan_req = PickPlanRequest(**{k: getattr(req, k) for k in PickPlanRequest.model_fields.keys()})
+        plan_resp = vision_plan(plan_req)
+        if isinstance(plan_resp, JSONResponse):
+            return plan_resp
+        if not plan_resp.get("success"):
+            return JSONResponse(status_code=400, content=plan_resp)
+
+        conf = plan_resp.get("confidence", {})
+        if conf.get("level") == "red":
+            return JSONResponse(status_code=409, content={
+                "success": False,
+                "error": "pick confidence is RED — too risky to execute",
+                "confidence": conf,
+            })
         import time as _time
         wp = plan_resp["waypoints"]
         all_wp = wp.get("all", [])
@@ -1535,7 +1538,7 @@ def vision_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool
             client.stop()
         except Exception:
             pass
-        _set_motion_active(None)
+        _release_motion()
 
 
 # ── Inverse Kinematics (query-only, no motion) ──────────────────
@@ -1545,7 +1548,7 @@ class InverseKinRequest(BaseModel):
 
 
 @app.post("/api/inverse-kin")
-async def inverse_kin(req: InverseKinRequest):
+def inverse_kin(req: InverseKinRequest):
     """Compute joint angles for one or more cartesian poses using the robot's
     own IK solver. Pure query — the robot does NOT move.
 
@@ -1584,23 +1587,39 @@ _motion_lock = threading.Lock()
 _motion_active: Optional[str] = None  # "servo" | "vla" | "pick" | None
 
 
-def _check_motion_free(mode: str) -> Optional[str]:
-    """Check that no other motion mode is active. Returns an error message if blocked."""
+def _acquire_motion(mode: str) -> Optional[str]:
+    """Atomically check and acquire the motion lock. Returns an error if blocked.
+
+    This is the single guard that prevents concurrent motion commands. The
+    caller MUST call _release_motion() in a finally block when done.
+    """
     with _motion_lock:
-        if _motion_active is not None and _motion_active != mode:
+        global _motion_active
+        if _motion_active is not None:
             return f"{_motion_active} is currently active — stop it first"
-        # Also check the actual running state.
         if _servo_tester is not None and _servo_tester.is_running() and mode != "servo":
             return "servo tester is running — stop it first"
         if _vla_executor is not None and _vla_executor.is_running() and mode != "vla":
             return "VLA executor is running — stop it first"
+        _motion_active = mode
     return None
 
 
-def _set_motion_active(mode: Optional[str]):
+def _release_motion():
     with _motion_lock:
         global _motion_active
-        _motion_active = mode
+        _motion_active = None
+
+
+# Keep old names for backward compat in case any code references them.
+def _check_motion_free(mode: str) -> Optional[str]:
+    return _acquire_motion(mode)
+
+def _set_motion_active(mode: Optional[str]):
+    if mode is None:
+        _release_motion()
+    else:
+        _acquire_motion(mode)
 
 
 # ── Settings store (single source of truth for persistent UI + VLA + servo config) ─
@@ -1731,7 +1750,7 @@ class VLARecordStart(BaseModel):
 
 
 @app.post("/api/vla/record/start")
-async def vla_record_start(req: VLARecordStart):
+def vla_record_start(req: VLARecordStart):
     try:
         rec = _get_vla_recorder()
         # Auto-enter drag mode for kinesthetic teaching.
@@ -1746,7 +1765,7 @@ async def vla_record_start(req: VLARecordStart):
 
 
 @app.post("/api/vla/record/stop")
-async def vla_record_stop():
+def vla_record_stop():
     try:
         rec = _get_vla_recorder()
         sealed = rec.stop()
@@ -1769,7 +1788,7 @@ class VLAExecuteStart(BaseModel):
 
 
 @app.post("/api/vla/execute/start")
-async def vla_execute_start(req: VLAExecuteStart):
+def vla_execute_start(req: VLAExecuteStart):
     global _vla_executor
     try:
         with _vla_lock:
@@ -1808,7 +1827,7 @@ async def vla_execute_start(req: VLAExecuteStart):
 
 
 @app.post("/api/vla/execute/stop")
-async def vla_execute_stop():
+def vla_execute_stop():
     try:
         ex = _vla_executor
         if ex is None:
