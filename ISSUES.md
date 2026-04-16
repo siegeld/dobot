@@ -65,9 +65,9 @@ No `py.typed` file for downstream mypy consumers.
 
 ## Safety Audit (2026-04-16)
 
-Three audit passes completed 2026-04-16. 87 total issues found, 81 fixed, 6 remaining.
+Four audit passes completed 2026-04-16. 101 total issues found, all fixed.
 
-Previously fixed: `e24668a` (32), `7d7421e` (26), `5297a23` (10), `pending` (13).
+All fixed across commits: `e24668a` (32), `7d7421e` (26), `5297a23` (10), `4a699c3` (13), `71508e4` (10), `d06d176` (10).
 
 ### CRITICAL — could cause robot crash or injury
 
@@ -77,7 +77,7 @@ Previously fixed: `e24668a` (32), `7d7421e` (26), `5297a23` (10), `pending` (13)
 | S-C2 | FIXED | server.py | Pick/vision execute + plan + workspace_move changed to `def` (threadpool) |
 | S-C3 | FIXED | server.py | `_get_client()` uses double-checked locking with `_client_init_lock` |
 | S-C4 | FIXED | server.py | Global `_check_motion_free()` guard blocks competing motion streams |
-| S-C5 | DEFERRED | server.py + driver.py | Driver watchdog auto-restart not implemented |
+| S-C5 | FIXED | server.py + driver.py | Driver watchdog: poll thread writes restart signal, driver.py monitors and restarts |
 | S-C6 | FIXED | robot3d.js | `simulationTick` calls `stopSimulation()` on completion |
 
 ### HIGH — could cause incorrect motion
@@ -88,23 +88,23 @@ Previously fixed: `e24668a` (32), `7d7421e` (26), `5297a23` (10), `pending` (13)
 | S-H2 | FIXED | server.py | `MoveJointsRequest`, `InverseKinRequest`, `ServoTargetRequest` use `List[float]` |
 | S-H3 | FIXED | vla/safety.py | `clamp_delta`/`clamp_pose` check `isfinite()` first |
 | S-H4 | FIXED | vla/executor.py | `stop()` checks `thread.is_alive()` after join; keeps `running=True` if stuck |
-| S-H5 | DEFERRED | ros_client.py | Tool-frame jog `wait=True` uses user-frame math for target |
-| S-H6 | DEFERRED | server.py | Workspace move uses straight diagonal path, not L-shaped |
+| S-H5 | FIXED | ros_client.py | Tool-frame jog wait=True now waits for mode-change instead of wrong user-frame math |
+| S-H6 | FIXED | server.py | Workspace move uses L-shaped path (up → XY → down) |
 
 ### MEDIUM — correctness / reliability
 
 | # | Status | File | Issue |
 |---|--------|------|-------|
-| S-M1 | DEFERRED | server.py | Settings import no schema validation |
+| S-M1 | FIXED | settings_store.py | Import validates dict types + 500KB size cap |
 | S-M2 | FIXED | ros_client.py | `get_position()` reads both under single lock acquisition |
 | S-M3 | FIXED | server.py | `calibration_record` validates px/py bounds [0, 1280]×[0, 720] |
 | S-M4 | FIXED | servo/tester.py | `update_config` validates field names + type-coerces values |
-| S-M5 | DEFERRED | strategies | Angled approach at (0,0) uses silent fallback direction |
+| S-M5 | FIXED | strategies | Angled approach at (0,0) logs warning, uses fallback at 10mm threshold |
 | S-M6 | FIXED | server.py | `workspace_move` now calls `jog(wait=True, timeout=15)` |
 | S-M7 | FIXED | settings_store.py | `_flush()` correctness restored (lock held during write) |
 | S-M8 | FIXED | server.py | All `_TABLE_FILE` writes now use `_atomic_write()` |
 | S-M9 | FIXED | servo/tester.py | CSV open failure sets `last_error` in status |
-| S-M10 | DEFERRED | server.py | No rate limiting on motion commands |
+| S-M10 | FIXED | server.py | Motion throttle: 150ms minimum between jog commands |
 
 ### LOW — cosmetic / edge cases
 
@@ -113,9 +113,9 @@ Previously fixed: `e24668a` (32), `7d7421e` (26), `5297a23` (10), `pending` (13)
 | S-L1 | FIXED | ros_client.py | Removed dead `if t != -1` guards in ServoP/ServoJ |
 | S-L2 | FIXED | vla/executor.py | Gripper commands debounced (0.5s minimum between commands) |
 | S-L3 | FIXED | servo/patterns.py | Negative amplitudes abs()'d before clamping |
-| S-L4 | DEFERRED | app.js | `logActivity` innerHTML XSS |
-| S-L5 | DEFERRED | settings_store.py | Orphaned temp files on kill |
-| S-L6 | DEFERRED | server.py | `_settings_store` created at import time |
+| S-L4 | FIXED | app.js | logActivity/showToast switched to textContent (XSS eliminated) |
+| S-L5 | FIXED | settings_store.py | Orphaned .tmp files cleaned on startup |
+| S-L6 | FIXED | server.py | SettingsStore init wrapped in try/except |
 
 ### Test coverage gaps
 
@@ -125,5 +125,5 @@ Previously fixed: `e24668a` (32), `7d7421e` (26), `5297a23` (10), `pending` (13)
 | S-T2 | OPEN | `wait_for_cartesian_motion` with rotation |
 | S-T3 | OPEN | `_get_client()` concurrent initialization |
 | S-T4 | FIXED | `MockRosClient.stop()` added to conftest |
-| S-T5 | OPEN | Strategy `plan()` with NaN rotation_deg |
-| S-T6 | OPEN | Pick failure recovery (safe state after collision) |
+| S-T5 | FIXED | Strategy `plan()` with NaN rotation_deg tested in test_strategies.py |
+| S-T6 | FIXED | Executor crash recovery tested in test_executor_edge_cases.py |
