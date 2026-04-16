@@ -146,7 +146,6 @@ class DobotRosClient(Node):
         with self._state_lock:
             self._joint_angles = [math.degrees(r) for r in msg.position]
             self._joint_stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-            self._joint_stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
     def _tool_vector_cb(self, msg: ToolVectorActual):
         with self._state_lock:
@@ -166,6 +165,57 @@ class DobotRosClient(Node):
                 self._gripper_state = json.loads(msg.data)
         except Exception:
             pass
+
+    # ── Value validation (defense-in-depth for robot safety) ────
+
+    @staticmethod
+    def _validate_finite(values: List[float], label: str = "values"):
+        """Reject NaN/Inf before any value reaches the robot controller.
+        This is the last-resort safety net — callers should also validate,
+        but if they don't, this catches it."""
+        for i, v in enumerate(values):
+            if not math.isfinite(v):
+                raise ValueError(
+                    f"{label}[{i}] is {v} — NaN/Inf must never reach the robot"
+                )
+
+    @staticmethod
+    def _validate_pose_bounds(pose: List[float]):
+        """Sanity-check a cartesian pose against hard physical limits.
+        These are deliberately wide — they catch gross errors (off by 10×)
+        without interfering with normal workspace-bounded operations.
+        The robot's own joint limits provide the real constraint."""
+        MAX_XYZ = 1500.0   # mm — CR5 reach is ~900mm; 1500 catches gross errors
+        MAX_ROT = 360.0    # deg
+        labels = ["X", "Y", "Z", "RX", "RY", "RZ"]
+        for i in range(3):
+            if abs(pose[i]) > MAX_XYZ:
+                raise ValueError(
+                    f"Pose {labels[i]}={pose[i]:.1f}mm exceeds hard limit ±{MAX_XYZ}mm"
+                )
+        for i in range(3, 6):
+            if abs(pose[i]) > MAX_ROT:
+                raise ValueError(
+                    f"Pose {labels[i]}={pose[i]:.1f}° exceeds hard limit ±{MAX_ROT}°"
+                )
+
+    @staticmethod
+    def _validate_joint_bounds(joints: List[float]):
+        """Sanity-check joint angles against the CR5's physical limits."""
+        # CR5 joint limits (degrees) — conservative outer bounds.
+        LIMITS = [
+            (-360, 360),   # J1
+            (-360, 360),   # J2
+            (-160, 160),   # J3
+            (-360, 360),   # J4
+            (-360, 360),   # J5
+            (-360, 360),   # J6
+        ]
+        for i, (lo, hi) in enumerate(LIMITS):
+            if joints[i] < lo or joints[i] > hi:
+                raise ValueError(
+                    f"Joint J{i+1}={joints[i]:.1f}° outside limits [{lo}, {hi}]"
+                )
 
     # ── Service helpers ────────────────────────────────────────
 
@@ -362,6 +412,9 @@ class DobotRosClient(Node):
         """
         if len(pose) != 6:
             raise ValueError("Must provide [X, Y, Z, RX, RY, RZ]")
+        self._validate_finite(pose, "ServoP pose")
+        self._validate_pose_bounds(pose)
+        t = max(0.004, min(3600.0, t))  # clamp to Dobot spec range
         request = ServoP.Request()
         request.a = float(pose[0])
         request.b = float(pose[1])
@@ -392,6 +445,9 @@ class DobotRosClient(Node):
         """Stream absolute joint angles via ServoJ (joint-space analog of servo_p)."""
         if len(joints) != 6:
             raise ValueError("Must provide exactly 6 joint angles")
+        self._validate_finite(joints, "ServoJ joints")
+        self._validate_joint_bounds(joints)
+        t = max(0.004, min(3600.0, t))
         request = ServoJ.Request()
         request.a = float(joints[0])
         request.b = float(joints[1])
@@ -414,6 +470,8 @@ class DobotRosClient(Node):
         """Move to cartesian pose [X, Y, Z, RX, RY, RZ] using MovJ."""
         if len(pose) != 6:
             raise ValueError("Must provide [X, Y, Z, RX, RY, RZ]")
+        self._validate_finite(pose, "MovJ pose")
+        self._validate_pose_bounds(pose)
         request = MovJ.Request()
         request.mode = False  # Cartesian mode
         request.a = float(pose[0])
@@ -430,6 +488,8 @@ class DobotRosClient(Node):
         """Move to absolute joint angles."""
         if len(angles) != 6:
             raise ValueError("Must provide exactly 6 joint angles")
+        self._validate_finite(angles, "MovJ joints")
+        self._validate_joint_bounds(angles)
 
         request = MovJ.Request()
         request.mode = True  # Joint mode
@@ -575,10 +635,15 @@ class DobotRosClient(Node):
         position: int,
         force: int = 50,
         speed: int = 50,
+        # NOTE: position is clamped to [0, 1000] below for safety.
         wait: bool = True,
         timeout: float = 10.0,
     ) -> int:
         """Move gripper via /gripper action."""
+        position = max(0, min(1000, int(position)))
+        force = max(20, min(100, int(force)))
+        speed = max(1, min(100, int(speed)))
+
         if not self._gripper_action_client.wait_for_server(timeout_sec=self.service_timeout):
             raise TimeoutError('Gripper action server not available')
 

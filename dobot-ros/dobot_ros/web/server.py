@@ -234,6 +234,12 @@ async def enable_robot():
         res = client.enable_robot()
         # Safety: set speed to 5% on enable
         client.set_speed_factor(5)
+        with _lock:
+            _state["speed_factor"] = 5
+        try:
+            _settings_store.patch("jog", {"speed": 5})
+        except Exception:
+            pass
         return {"success": True, "result": res}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -629,7 +635,7 @@ async def set_table_clearance(req: dict):
     """Set minimum clearance above table in mm."""
     try:
         data = json.loads(_TABLE_FILE.read_text()) if _TABLE_FILE.exists() else {"points": [], "plane": None}
-        data["min_clearance_mm"] = req.get("min_clearance_mm", 25)
+        data["min_clearance_mm"] = max(0, float(req.get("min_clearance_mm", 25)))
         _TABLE_FILE.write_text(json.dumps(data, indent=2))
         return {"success": True, "min_clearance_mm": data["min_clearance_mm"]}
     except Exception as e:
@@ -990,10 +996,11 @@ async def pick_execute(req: PickExecuteRequest):
 
         logging.info("pick: approach %s", approach)
         client.move_pose(approach)
+        client.wait_for_cartesian_motion(approach, tolerance=3.0, timeout=15.0)
 
         logging.info("pick: descend to grasp %s", grasp)
         client.move_pose(grasp)
-        _time.sleep(0.2)
+        client.wait_for_cartesian_motion(grasp, tolerance=3.0, timeout=15.0)
 
         logging.info("pick: closing gripper")
         try:
@@ -1003,6 +1010,7 @@ async def pick_execute(req: PickExecuteRequest):
 
         logging.info("pick: retract %s", retract)
         client.move_pose(retract)
+        client.wait_for_cartesian_motion(retract, tolerance=3.0, timeout=15.0)
 
         return {"success": True, "waypoints": wp, "target": plan_resp["target"]}
     except Exception as e:
@@ -1276,9 +1284,12 @@ async def vision_plan(req: PickPlanRequest):
         object_height_mm = vt.object_height_mm(expected_depth_m, depth_mean_m) \
             if depth_mean_m and depth_mean_m > 0 else 0.0
 
-        # Workspace check.
+        # Workspace check — use table-plane bounds if available.
         from dobot_ros.vla.safety import SafetyLimits
-        limits = SafetyLimits()
+        if _TABLE_FILE.exists():
+            limits = SafetyLimits.from_table_plane(_TABLE_FILE)
+        else:
+            limits = SafetyLimits()
         in_workspace = (limits.x_min <= robot_x <= limits.x_max and
                         limits.y_min <= robot_y <= limits.y_max)
 
@@ -1430,9 +1441,10 @@ async def vision_execute(req: PickExecuteRequest):
                 except Exception as e:
                     logging.warning("gripper open failed: %s", e)
 
-            # Move to waypoint.
+            # Move to waypoint and WAIT for arrival before the next step.
             logging.info("vision pick [%d/%d] %s: move to %s", i+1, len(all_wp), label, pose)
             client.move_pose(pose)
+            client.wait_for_cartesian_motion(pose, tolerance=3.0, timeout=15.0)
 
             # Pause.
             if pause_s > 0:
@@ -1557,7 +1569,8 @@ def _settings_load_safety_check():
         pass
 
     unsafe_modes = {6: "BACKDRIVE/drag", 7: "RUNNING", 9: "ERROR", 11: "COLLISION"}
-    mode = _state.get("robot_mode", -1)
+    with _lock:
+        mode = _state.get("robot_mode", -1)
     if mode in unsafe_modes:
         reasons.append(f"robot is in {unsafe_modes[mode]} mode — stop/clear first")
 

@@ -65,9 +65,11 @@ class SimpleTopDown(PickStrategy):
         speed = int(p.get("move_speed", 30))
 
         # Grasp Z: table surface + clearance, optionally adjusted for object height.
+        # SAFETY: always enforce min_clearance_mm as the absolute floor.
         grasp_z = ctx.table_z + max(clearance, ctx.min_clearance_mm)
         if use_height and ctx.object_present and ctx.object_height_mm > 10:
-            grasp_z = ctx.table_z + max(clearance, ctx.object_height_mm / 2.0)
+            height_z = ctx.table_z + ctx.object_height_mm / 2.0
+            grasp_z = max(grasp_z, height_z)  # only raise, never lower below clearance
 
         approach_z = grasp_z + approach_h
         retract_z = grasp_z + lift_h

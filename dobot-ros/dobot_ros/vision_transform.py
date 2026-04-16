@@ -223,7 +223,7 @@ class VisionTransform:
         # the distance along ray_rob. Convert from mm to meters.
         # The actual 3D distance in camera frame:
         hit_robot = origin + t_param * ray_rob
-        p_camera_space = np.linalg.inv(self.extrinsics.R) @ (hit_robot - self.extrinsics.t)
+        p_camera_space = self.extrinsics.R.T @ (hit_robot - self.extrinsics.t)
         return float(np.linalg.norm(p_camera_space)) / 1000.0  # mm → meters
 
     def object_height_mm(self, expected_depth_m: float, measured_depth_m: float) -> float:

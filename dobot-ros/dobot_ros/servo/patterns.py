@@ -37,10 +37,11 @@ class CirclePattern(Pattern):
 
     def target_at(self, t: float) -> List[float]:
         theta = 2.0 * math.pi * t / self.period_s
-        c = self.radius_mm * math.cos(theta)
+        # Circle centered on (anchor - radius) along the first axis.
+        # At t=0: offset=(0,0) — starts at anchor with no jump.
+        # Peak excursion from anchor is 2*radius along the first axis.
+        c = self.radius_mm * (math.cos(theta) - 1.0)
         s = self.radius_mm * math.sin(theta)
-        # Start at +radius along first axis so there's no jump at t=0.
-        c -= self.radius_mm
         if self.plane == "xy":
             return [c, s, 0.0, 0.0, 0.0, 0.0]
         if self.plane == "xz":
@@ -104,8 +105,13 @@ class SineWavePattern(Pattern):
         return out
 
 
+_MAX_XYZ_AMPLITUDE_MM = 200.0
+_MAX_ROT_AMPLITUDE_DEG = 30.0
+
+
 def build_pattern(name: str, params: dict) -> Pattern:
-    """Dispatch a pattern by name with keyword params from the web UI."""
+    """Dispatch a pattern by name with keyword params from the web UI.
+    Clamps amplitudes to prevent dangerous excursions."""
     name = name.lower()
     cls = {
         "circle": CirclePattern,
@@ -115,4 +121,22 @@ def build_pattern(name: str, params: dict) -> Pattern:
     }.get(name)
     if cls is None:
         raise ValueError(f"unknown pattern: {name}")
-    return cls(**(params or {}))
+
+    params = dict(params or {})
+
+    # Clamp XYZ amplitudes/radii.
+    for key in ("radius_mm", "amplitude_x_mm", "amplitude_y_mm", "amplitude"):
+        if key in params:
+            params[key] = min(float(params[key]), _MAX_XYZ_AMPLITUDE_MM)
+
+    # Validate axis for square/sine patterns.
+    if "axis" in params:
+        axis = str(params["axis"]).lower()
+        if axis not in ("x", "y", "z", "rx", "ry", "rz"):
+            raise ValueError(f"invalid axis: {axis}")
+        params["axis"] = axis
+        # For rotation axes, clamp amplitude to rotation limit.
+        if axis in ("rx", "ry", "rz") and "amplitude" in params:
+            params["amplitude"] = min(float(params["amplitude"]), _MAX_ROT_AMPLITUDE_DEG)
+
+    return cls(**params)

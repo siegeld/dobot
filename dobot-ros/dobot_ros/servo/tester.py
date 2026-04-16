@@ -192,6 +192,8 @@ class ServoTester:
     # ── Main loop ───────────────────────────────────────────────
     def _run(self):
         last_overrun_report = 0.0
+        consecutive_failures = 0
+        MAX_CONSECUTIVE_FAILURES = 10
         try:
             while not self._stop.is_set():
                 tick_start = time.perf_counter()
@@ -221,6 +223,7 @@ class ServoTester:
                         gain=self.config.gain,
                     )
                     latency_ms = (time.perf_counter() - call_start) * 1000.0
+                    consecutive_failures = 0
                     with self._lock:
                         self._latencies.append(latency_ms)
                         self._status.last_latency_ms = latency_ms
@@ -230,11 +233,14 @@ class ServoTester:
                         self._refresh_percentiles()
                     self._maybe_log(clamped, offset, latency_ms)
                 except Exception as e:
-                    log.warning("servo_p call failed: %s", e)
+                    consecutive_failures += 1
+                    log.warning("servo_p call failed (%d/%d): %s",
+                                consecutive_failures, MAX_CONSECUTIVE_FAILURES, e)
                     with self._lock:
                         self._status.last_error = f"servo_p: {e}"
-                    # One failure is tolerable — bail only after several.
-                    # For now we keep going; the web UI shows the error.
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                        log.error("servo tester aborting after %d consecutive failures", consecutive_failures)
+                        break
 
                 # Pace the loop.
                 elapsed = time.perf_counter() - tick_start
@@ -260,6 +266,12 @@ class ServoTester:
             with self._lock:
                 self._status.last_error = str(e)
         finally:
+            # SAFETY: halt the robot when the tester exits (normal stop or crash).
+            # Without this, the robot holds the last ServoP target unsupervised.
+            try:
+                self.ros.stop()
+            except Exception as stop_err:
+                log.warning("ros.stop() during tester shutdown failed: %s", stop_err)
             with self._lock:
                 self._status.running = False
                 self._close_csv()

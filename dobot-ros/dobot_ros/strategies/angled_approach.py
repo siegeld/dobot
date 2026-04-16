@@ -101,9 +101,11 @@ class AngledApproach(PickStrategy):
         close_pos = int(p.get("gripper_close_pos", 200))
         speed = int(p.get("move_speed", 25))
 
+        # SAFETY: always enforce min_clearance_mm as the absolute floor.
         grasp_z = ctx.table_z + max(clearance, ctx.min_clearance_mm)
         if ctx.object_present and ctx.object_height_mm > 10:
-            grasp_z = ctx.table_z + max(clearance, ctx.object_height_mm / 2.0)
+            height_z = ctx.table_z + ctx.object_height_mm / 2.0
+            grasp_z = max(grasp_z, height_z)  # only raise, never lower below clearance
 
         approach_z = grasp_z + approach_h
         hover_z = grasp_z + hover_h

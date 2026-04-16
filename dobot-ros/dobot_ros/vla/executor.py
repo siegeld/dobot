@@ -137,6 +137,14 @@ class VLAExecutor:
                 if not chunk:
                     continue
 
+                # Validate action dimensions — model must emit 7-D actions.
+                bad = [i for i, a in enumerate(chunk) if len(a) < 7]
+                if bad:
+                    log.warning("model returned wrong action dims at indices %s (expected 7-D); skipping chunk", bad)
+                    with self._lock:
+                        self._status.last_error = f"bad action dims: {[len(chunk[i]) for i in bad]}"
+                    continue
+
                 # Upsample chunk to servo rate. Each model action represents
                 # 1/model_rate_hz seconds; we divide it into M sub-steps of
                 # 1/servo_rate_hz each with linear interpolation.
@@ -158,6 +166,12 @@ class VLAExecutor:
                 self._status.last_error = str(e)
                 self._status.running = False
         finally:
+            # SAFETY: always halt the robot when the executor exits (normal or crash).
+            # Without this, the robot continues toward the last ServoP target unsupervised.
+            try:
+                self.ros.stop()
+            except Exception as e:
+                log.warning("ros.stop() during executor shutdown failed: %s", e)
             with self._lock:
                 self._status.running = False
 

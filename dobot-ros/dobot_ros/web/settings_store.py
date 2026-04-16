@@ -204,7 +204,9 @@ class SettingsStore:
 
     def _writer_loop(self):
         while not self._writer_stop.is_set():
-            if self._dirty and (time.time() - self._last_write) >= WRITE_DEBOUNCE_S:
+            with self._lock:
+                should_flush = self._dirty and (time.time() - self._last_write) >= WRITE_DEBOUNCE_S
+            if should_flush:
                 self._flush()
             self._writer_stop.wait(timeout=0.25)
 
