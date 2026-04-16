@@ -1565,7 +1565,10 @@
 
   // ── Vision tab ─────────────────────────────────────────────────
 
-  const _visState = { objects: [], target: null, plan: null, pollTimer: null, grid: null };
+  const _visState = {
+    objects: [], target: null, plan: null, pollTimer: null, grid: null,
+    strategies: [], activeSlug: null, activeParams: {},
+  };
 
   function initVisionTab() {
     const btn = document.getElementById('tab-vision-btn');
@@ -1576,6 +1579,7 @@
       visRefreshStatus();
       visStartPolling();
       visFetchGrid();
+      visLoadStrategies();
     });
     btn.addEventListener('hidden.bs.tab', visStopPolling);
 
@@ -1584,6 +1588,9 @@
     });
     document.getElementById('vis-show-objects')?.addEventListener('change', visDrawOverlay);
     document.getElementById('vis-show-grid')?.addEventListener('change', () => { visFetchGrid(); visDrawOverlay(); });
+    document.getElementById('vis-strategy-select')?.addEventListener('change', visOnStrategyChange);
+    document.getElementById('btn-vis-save-params')?.addEventListener('click', visSaveParams);
+    document.getElementById('btn-vis-reset-params')?.addEventListener('click', visResetParams);
     document.getElementById('btn-vis-cancel')?.addEventListener('click', () => {
       _visState.target = null; _visState.plan = null;
       visRenderPreview(null); visDrawOverlay();
@@ -1747,14 +1754,154 @@
     }
   }
 
+  // ── Strategy management ────────────────────────────────────────
+
+  async function visLoadStrategies() {
+    try {
+      const [listRes, activeRes] = await Promise.all([
+        fetch('/api/strategies/list').then(r => r.json()),
+        fetch('/api/strategies/active').then(r => r.json()),
+      ]);
+      _visState.strategies = listRes.strategies || [];
+      _visState.activeSlug = activeRes.slug;
+      _visState.activeParams = activeRes.params || {};
+
+      const sel = document.getElementById('vis-strategy-select');
+      if (sel) {
+        sel.innerHTML = _visState.strategies.map(s =>
+          `<option value="${s.slug}" ${s.slug === _visState.activeSlug ? 'selected' : ''}>${s.name}</option>`
+        ).join('');
+      }
+      visRenderStrategyForm();
+    } catch (e) {
+      console.warn('Failed to load strategies:', e);
+    }
+  }
+
+  async function visOnStrategyChange() {
+    const sel = document.getElementById('vis-strategy-select');
+    const slug = sel?.value;
+    if (!slug || slug === _visState.activeSlug) return;
+    await fetch('/api/strategies/active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug }),
+    });
+    _visState.activeSlug = slug;
+    const s = _visState.strategies.find(st => st.slug === slug);
+    _visState.activeParams = s?.current_params || {};
+    visRenderStrategyForm();
+    logActivity(`Strategy changed to: ${s?.name || slug}`, 'info');
+  }
+
+  function visRenderStrategyForm() {
+    const container = document.getElementById('vis-strategy-params');
+    const descEl = document.getElementById('vis-strategy-desc');
+    if (!container) return;
+    const s = _visState.strategies.find(st => st.slug === _visState.activeSlug);
+    if (!s) { container.innerHTML = ''; return; }
+    if (descEl) descEl.textContent = s.description || '';
+
+    const params = s.parameters || [];
+    const vals = _visState.activeParams;
+    container.innerHTML = params.map(p => {
+      const val = vals[p.name] ?? p.default;
+      const unit = p.unit ? ` <small class="text-muted">${p.unit}</small>` : '';
+      const tip = p.description ? ` data-bs-toggle="tooltip" title="${p.description.replace(/"/g, '&quot;')}"` : '';
+
+      if (p.type === 'bool') {
+        return `<div class="form-check mb-1"${tip}>
+          <input class="form-check-input strat-param" type="checkbox" data-param="${p.name}" ${val ? 'checked' : ''}>
+          <label class="form-check-label small">${p.name.replace(/_/g, ' ')}</label>
+        </div>`;
+      }
+      if (p.type === 'choice') {
+        const opts = (p.choices || []).map(c =>
+          `<option value="${c}" ${c === val ? 'selected' : ''}>${c}</option>`).join('');
+        return `<div class="mb-1"${tip}>
+          <label class="form-label small mb-0">${p.name.replace(/_/g, ' ')}${unit}</label>
+          <select class="form-select form-select-sm strat-param" data-param="${p.name}">${opts}</select>
+        </div>`;
+      }
+      // float or int
+      const attrs = [
+        `type="number"`, `value="${val}"`, `data-param="${p.name}"`,
+        p.min != null ? `min="${p.min}"` : '',
+        p.max != null ? `max="${p.max}"` : '',
+        p.step != null ? `step="${p.step}"` : '',
+      ].filter(Boolean).join(' ');
+      return `<div class="mb-1"${tip}>
+        <label class="form-label small mb-0">${p.name.replace(/_/g, ' ')}${unit}</label>
+        <input class="form-control form-control-sm strat-param" ${attrs}>
+      </div>`;
+    }).join('');
+
+    // Re-init tooltips for the new elements.
+    if (typeof bootstrap !== 'undefined' && bootstrap.Tooltip) {
+      container.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+        bootstrap.Tooltip.getOrCreateInstance(el, { container: 'body', delay: { show: 400, hide: 100 } });
+      });
+    }
+  }
+
+  function visCollectParams() {
+    const params = {};
+    document.querySelectorAll('.strat-param').forEach(el => {
+      const key = el.dataset.param;
+      if (!key) return;
+      if (el.type === 'checkbox') params[key] = el.checked;
+      else if (el.type === 'number') params[key] = parseFloat(el.value);
+      else params[key] = el.value;
+    });
+    return params;
+  }
+
+  async function visSaveParams() {
+    const slug = _visState.activeSlug;
+    if (!slug) return;
+    const params = visCollectParams();
+    const r = await fetch(`/api/strategies/${slug}/params`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const res = await r.json();
+    if (res.success) {
+      _visState.activeParams = res.params;
+      showToast('Strategy params saved', 'success');
+      logActivity(`Saved params for ${slug}`, 'info');
+    } else {
+      showToast(`Save failed: ${res.error || r.status}`, 'danger');
+    }
+  }
+
+  async function visResetParams() {
+    const slug = _visState.activeSlug;
+    if (!slug) return;
+    const s = _visState.strategies.find(st => st.slug === slug);
+    if (!s) return;
+    const defaults = {};
+    (s.parameters || []).forEach(p => { defaults[p.name] = p.default; });
+    const r = await fetch(`/api/strategies/${slug}/params`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(defaults),
+    });
+    const res = await r.json();
+    if (res.success) {
+      _visState.activeParams = res.params;
+      visRenderStrategyForm();
+      showToast('Reset to defaults', 'info');
+    }
+  }
+
   async function visPlanTarget(target) {
     _visState.target = target;
+    // Strategy params are read server-side from the active strategy's JSON.
+    // We just send the target — no hardcoded approach/grasp/lift here.
     const body = target.kind === 'object'
       ? { object_id: target.object_id }
       : { px: target.px, py: target.py };
-    body.approach_mm = parseFloat(document.getElementById('vis-approach-mm')?.value || 100);
-    body.grasp_clearance_mm = parseFloat(document.getElementById('vis-grasp-mm')?.value || 5);
-    body.lift_mm = parseFloat(document.getElementById('vis-lift-mm')?.value || 150);
 
     try {
       const r = await fetch('/api/vision/plan', {
@@ -1795,6 +1942,12 @@
 
     const fmtP = (p) => p ? `(${p[0]}, ${p[1]}, ${p[2]}) mm` : '--';
     const $ = id => document.getElementById(id);
+
+    // Show which strategy produced this plan.
+    const stratName = plan.strategy?.name || _visState.activeSlug || '?';
+    const planCard = document.querySelector('#vis-preview')?.closest('.card');
+    const planHeader = planCard?.querySelector('.card-header');
+    if (planHeader) planHeader.innerHTML = `<i class="bi bi-hand-index-thumb"></i> Pick target <span class="badge bg-info ms-2">${stratName}</span>`;
 
     $('vis-p-pixel').textContent = t.pixel ? `(${t.pixel[0]}, ${t.pixel[1]})` : '--';
     $('vis-p-robot-xy').textContent = t.robot_xy ? `(${t.robot_xy[0]}, ${t.robot_xy[1]}) mm` : '--';
@@ -1871,14 +2024,22 @@
     const list = document.getElementById('vis-plan-steps');
     if (!card || !list) return;
     card.style.display = '';
-    const fmtP = p => p ? `(${p[0]}, ${p[1]}, ${p[2]})` : '--';
-    list.innerHTML = [
-      `<li>Open gripper to 800</li>`,
-      `<li>Move to approach: ${fmtP(wp.approach)}</li>`,
-      `<li>Descend to grasp: ${fmtP(wp.grasp)}</li>`,
-      `<li>Close gripper to 200</li>`,
-      `<li>Retract to: ${fmtP(wp.retract)}</li>`,
-    ].join('');
+    const fmtP = p => p ? `(${p[0].toFixed(1)}, ${p[1].toFixed(1)}, ${p[2].toFixed(1)})` : '--';
+    const allWp = wp.all || [];
+    if (allWp.length) {
+      list.innerHTML = allWp.map((w, i) => {
+        let desc = w.label;
+        if (w.gripper_action) desc += ` [gripper ${w.gripper_action} → ${w.gripper_pos}]`;
+        desc += `: ${fmtP(w.pose)}`;
+        return `<li>${desc}</li>`;
+      }).join('');
+    } else {
+      list.innerHTML = [
+        `<li>Approach: ${fmtP(wp.approach)}</li>`,
+        `<li>Grasp: ${fmtP(wp.grasp)}</li>`,
+        `<li>Retract: ${fmtP(wp.retract)}</li>`,
+      ].join('');
+    }
   }
 
   async function visExecute() {
@@ -1895,9 +2056,6 @@
     const body = t.kind === 'object'
       ? { object_id: t.object_id, confirm: true }
       : { px: t.px, py: t.py, confirm: true };
-    body.approach_mm = parseFloat(document.getElementById('vis-approach-mm')?.value || 100);
-    body.grasp_clearance_mm = parseFloat(document.getElementById('vis-grasp-mm')?.value || 5);
-    body.lift_mm = parseFloat(document.getElementById('vis-lift-mm')?.value || 150);
 
     try {
       logActivity(`Executing pick: ${desc}...`, 'info');

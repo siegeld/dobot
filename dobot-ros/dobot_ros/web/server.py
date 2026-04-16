@@ -1061,6 +1061,58 @@ def _get_vision_transform():
     return _vision_transform
 
 
+# ── Strategy registry ────────────────────────────────────────────
+
+from dobot_ros.strategies import StrategyRegistry
+_strategy_registry = StrategyRegistry()
+
+
+@app.get("/api/strategies/list")
+async def strategies_list():
+    return {"strategies": _strategy_registry.list_strategies()}
+
+
+@app.get("/api/strategies/active")
+async def strategies_active():
+    slug = _settings_store.get("pick_strategy").get("active", "simple_top_down")
+    params = _strategy_registry.get_params(slug)
+    try:
+        meta = _strategy_registry.get_strategy(slug).metadata()
+    except KeyError:
+        meta = {"slug": slug, "name": slug, "parameters": []}
+    return {"slug": slug, "params": params, **meta}
+
+
+@app.post("/api/strategies/active")
+async def strategies_set_active(req: dict):
+    slug = req.get("slug", "")
+    try:
+        _strategy_registry.get_strategy(slug)
+    except KeyError:
+        return JSONResponse(status_code=404, content={"success": False, "error": f"unknown strategy: {slug}"})
+    _settings_store.patch("pick_strategy", {"active": slug})
+    return {"success": True, "slug": slug}
+
+
+@app.get("/api/strategies/{slug}/params")
+async def strategies_get_params(slug: str):
+    try:
+        return {"params": _strategy_registry.get_params(slug)}
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"unknown strategy: {slug}")
+
+
+@app.post("/api/strategies/{slug}/params")
+async def strategies_set_params(slug: str, req: dict):
+    try:
+        validated = _strategy_registry.set_params(slug, req)
+        return {"success": True, "params": validated}
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"unknown strategy: {slug}")
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
+
+
 @app.get("/api/vision/status")
 async def vision_status():
     """Vision system status: calibration loaded, table Z, intrinsics."""
@@ -1239,25 +1291,46 @@ async def vision_plan(req: PickPlanRequest):
             area_px=area_px if area_px else 500,
         )
 
-        # Compute waypoints.
-        grasp_z_offset = max(req.grasp_clearance_mm, vt.min_clearance_mm)
-        if object_present and object_height_mm > 10:
-            # Grasp at object midheight instead of table surface.
-            grasp_z_offset = max(grasp_z_offset, object_height_mm / 2.0)
+        # Run the active strategy to compute waypoints.
+        from dobot_ros.strategies.base import PickContext
+        active_slug = _settings_store.get("pick_strategy").get("active", "simple_top_down")
+        strategy = _strategy_registry.get_strategy(active_slug)
+        strategy_params = _strategy_registry.get_params(active_slug)
 
-        approach, grasp, retract, _, _ = _compute_pick_waypoints(
+        client = _get_client()
+        current_pose = client.get_cartesian_pose()
+
+        pick_ctx = PickContext(
             robot_x=robot_x, robot_y=robot_y,
+            table_z=vt.table_z,
+            min_clearance_mm=vt.min_clearance_mm,
             rotation_deg=table_rot_deg,
-            approach_mm=req.approach_mm,
-            grasp_clearance_mm=grasp_z_offset,
-            lift_mm=req.lift_mm,
+            current_pose=current_pose,
+            object_height_mm=object_height_mm,
+            object_present=object_present,
+            object_data=obj,
+            params=strategy_params,
         )
+        pick_plan = strategy.plan(pick_ctx)
 
-        # Pixel coords for overlay visualization (project waypoints back to image).
+        # Extract named waypoints for backward compat + overlay.
+        all_waypoints = [{"pose": [round(v, 1) for v in wp.pose],
+                          "label": wp.label,
+                          "gripper_action": wp.gripper_action,
+                          "gripper_pos": wp.gripper_pos,
+                          "pause_s": wp.pause_s}
+                         for wp in pick_plan.waypoints]
+
+        # Find the first approach-like, grasp-like, and retract-like for the legacy shape.
+        wp_approach = next((w for w in pick_plan.waypoints if "approach" in w.label.lower()), pick_plan.waypoints[0])
+        wp_grasp = next((w for w in pick_plan.waypoints if "grasp" in w.label.lower() and w.gripper_action != "close"), pick_plan.waypoints[-2] if len(pick_plan.waypoints) > 2 else pick_plan.waypoints[-1])
+        wp_retract = next((w for w in pick_plan.waypoints if "retract" in w.label.lower()), pick_plan.waypoints[-1])
+
+        # Pixel coords for overlay visualization.
         overlay_px = {}
-        for name, wp in [("approach", approach), ("grasp", grasp), ("retract", retract)]:
+        for name, wp in [("approach", wp_approach), ("grasp", wp_grasp), ("retract", wp_retract)]:
             try:
-                opx, opy = vt.robot_to_pixel(wp[0], wp[1], wp[2])
+                opx, opy = vt.robot_to_pixel(wp.pose[0], wp.pose[1], wp.pose[2])
                 overlay_px[name] = [round(opx, 1), round(opy, 1)]
             except Exception:
                 pass
@@ -1269,11 +1342,12 @@ async def vision_plan(req: PickPlanRequest):
             warnings.append("depth check: no object detected above the table at this pixel")
         if not in_workspace:
             warnings.append(f"target ({robot_x:.0f}, {robot_y:.0f}) is outside workspace bounds")
-        if grasp[2] < vt.table_z - 1:
-            warnings.append(f"grasp Z {grasp[2]:.1f} below table Z {vt.table_z:.1f}")
+        if wp_grasp.pose[2] < vt.table_z - 1:
+            warnings.append(f"grasp Z {wp_grasp.pose[2]:.1f} below table Z {vt.table_z:.1f}")
 
         return {
             "success": True,
+            "strategy": {"slug": active_slug, "name": strategy.name},
             "target": {
                 "pixel": [center_px, center_py],
                 "robot_xy": [round(robot_x, 1), round(robot_y, 1)],
@@ -1289,9 +1363,10 @@ async def vision_plan(req: PickPlanRequest):
             },
             "confidence": confidence.to_dict(),
             "waypoints": {
-                "approach": [round(v, 1) for v in approach],
-                "grasp": [round(v, 1) for v in grasp],
-                "retract": [round(v, 1) for v in retract],
+                "approach": [round(v, 1) for v in wp_approach.pose],
+                "grasp": [round(v, 1) for v in wp_grasp.pose],
+                "retract": [round(v, 1) for v in wp_retract.pose],
+                "all": all_waypoints,
             },
             "overlay_pixels": overlay_px,
             "warnings": warnings,
@@ -1329,32 +1404,50 @@ async def vision_execute(req: PickExecuteRequest):
     try:
         import time as _time
         wp = plan_resp["waypoints"]
-        approach, grasp, retract = wp["approach"], wp["grasp"], wp["retract"]
+        all_wp = wp.get("all", [])
         client = _get_client()
 
-        logging.info("vision pick: opening gripper")
-        try:
-            client.gripper_move(800, force=50, speed=50, wait=True)
-        except Exception as e:
-            logging.warning("gripper open failed (continuing): %s", e)
+        # Set speed if the strategy specified one.
+        strategy_slug = plan_resp.get("strategy", {}).get("slug", "simple_top_down")
+        params = _strategy_registry.get_params(strategy_slug)
+        speed = int(params.get("move_speed", 30))
+        force = int(params.get("gripper_force", 50))
+        client.set_speed_factor(speed)
 
-        logging.info("vision pick: approach %s", approach)
-        client.move_pose(approach)
+        # Execute each waypoint in order.
+        for i, step in enumerate(all_wp):
+            pose = step["pose"]
+            label = step.get("label", f"step {i+1}")
+            gripper_action = step.get("gripper_action")
+            gripper_pos = step.get("gripper_pos")
+            pause_s = step.get("pause_s", 0)
 
-        logging.info("vision pick: descend to grasp %s", grasp)
-        client.move_pose(grasp)
-        _time.sleep(0.2)
+            # Gripper action BEFORE the move (open before approach).
+            if gripper_action == "open" and gripper_pos is not None:
+                logging.info("vision pick [%d/%d] %s: open gripper to %d", i+1, len(all_wp), label, gripper_pos)
+                try:
+                    client.gripper_move(gripper_pos, force=force, speed=50, wait=True)
+                except Exception as e:
+                    logging.warning("gripper open failed: %s", e)
 
-        logging.info("vision pick: closing gripper")
-        try:
-            client.gripper_move(200, force=50, speed=50, wait=True)
-        except Exception as e:
-            logging.warning("gripper close failed: %s", e)
+            # Move to waypoint.
+            logging.info("vision pick [%d/%d] %s: move to %s", i+1, len(all_wp), label, pose)
+            client.move_pose(pose)
 
-        logging.info("vision pick: retract %s", retract)
-        client.move_pose(retract)
+            # Pause.
+            if pause_s > 0:
+                _time.sleep(pause_s)
 
-        return {"success": True, "waypoints": wp, "target": plan_resp["target"]}
+            # Gripper action AFTER the move (close at grasp).
+            if gripper_action == "close" and gripper_pos is not None:
+                logging.info("vision pick [%d/%d] %s: close gripper to %d", i+1, len(all_wp), label, gripper_pos)
+                try:
+                    client.gripper_move(gripper_pos, force=force, speed=50, wait=True)
+                except Exception as e:
+                    logging.warning("gripper close failed: %s", e)
+
+        return {"success": True, "waypoints": wp, "target": plan_resp["target"],
+                "strategy": plan_resp.get("strategy")}
     except Exception as e:
         logging.exception("vision execute failed")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
@@ -1423,6 +1516,7 @@ _SETTINGS_DEFAULTS = {
     "camera_view": {},
     "gripper": {"force": 20, "speed": 50},
     "jog": {"linear_step": 5, "angular_step": 5, "speed": 5, "mode": "user"},
+    "pick_strategy": {"active": "simple_top_down"},
 }
 
 # Legacy per-file JSON paths migrate into the store on first startup.

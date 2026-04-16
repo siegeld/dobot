@@ -1,0 +1,10 @@
+{
+  "approach_height_mm": 100.0,
+  "grasp_clearance_mm": 5.0,
+  "lift_height_mm": 150.0,
+  "use_object_height": true,
+  "gripper_open_pos": 800,
+  "gripper_close_pos": 200,
+  "gripper_force": 50,
+  "move_speed": 30
+}

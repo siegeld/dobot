@@ -715,31 +715,29 @@
                 </div>
               </div>
 
-              <!-- Pick settings -->
+              <!-- Strategy selector + dynamic params -->
               <div class="card mb-2">
-                <div class="card-header py-2" data-bs-toggle="collapse" data-bs-target="#vis-pick-settings" role="button">
-                  <i class="bi bi-sliders"></i> Pick settings
-                  <i class="bi bi-chevron-down float-end panel-chevron"></i>
+                <div class="card-header py-2">
+                  <i class="bi bi-puzzle"></i> Pick strategy
                 </div>
-                <div class="collapse" id="vis-pick-settings">
-                  <div class="card-body py-2">
-                    <div class="row g-2">
-                      <div class="col-6">
-                        <label class="form-label small mb-0" data-bs-toggle="tooltip"
-                               title="Height above grasp Z to start the approach.">Approach (mm)</label>
-                        <input type="number" class="form-control form-control-sm" id="vis-approach-mm" value="100" min="20" max="300">
-                      </div>
-                      <div class="col-6">
-                        <label class="form-label small mb-0" data-bs-toggle="tooltip"
-                               title="Extra clearance above table Z at grasp. Actual grasp Z = max(this, object_height/2).">Grasp clearance (mm)</label>
-                        <input type="number" class="form-control form-control-sm" id="vis-grasp-mm" value="5" min="0" max="100">
-                      </div>
-                      <div class="col-6">
-                        <label class="form-label small mb-0" data-bs-toggle="tooltip"
-                               title="How high to lift after grasping.">Lift (mm)</label>
-                        <input type="number" class="form-control form-control-sm" id="vis-lift-mm" value="150" min="20" max="400">
-                      </div>
-                    </div>
+                <div class="card-body py-2">
+                  <select class="form-select form-select-sm mb-2" id="vis-strategy-select"
+                          data-bs-toggle="tooltip" title="Choose which pick strategy to use. Each strategy has its own tunable parameters below.">
+                    <option value="">Loading...</option>
+                  </select>
+                  <div id="vis-strategy-desc" class="small text-muted mb-2"></div>
+                  <div id="vis-strategy-params">
+                    <!-- Dynamically populated from strategy's parameter_defs() -->
+                  </div>
+                  <div class="d-flex gap-2 mt-2">
+                    <button class="btn btn-outline-primary btn-sm flex-fill" id="btn-vis-save-params"
+                            data-bs-toggle="tooltip" title="Save current parameter values to the strategy's JSON file.">
+                      <i class="bi bi-save"></i> Save params
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" id="btn-vis-reset-params"
+                            data-bs-toggle="tooltip" title="Reset all parameters to the strategy's built-in defaults.">
+                      Defaults
+                    </button>
                   </div>
                 </div>
               </div>
