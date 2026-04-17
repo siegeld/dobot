@@ -185,6 +185,77 @@ class SpaceMouseReader:
         except Exception as e:
             log.warning("gripper_move(%d) failed: %s", position, e)
 
+    # ── Tick loop ───────────────────────────────────────────────────
+    def tick_once(self, dt: float):
+        """One iteration of the 50 Hz integration loop. Tests drive this directly;
+        in production the threaded wrapper calls it every `dt` seconds."""
+        with self._lock:
+            s = self._settings
+            v = [0.0] * 6
+            any_active = False
+            for i in range(6):
+                a = self._last_raw[i]
+                if abs(a) >= s.deadband:
+                    scale = s.max_velocity_xyz if i < 3 else s.max_velocity_rpy
+                    v[i] = a * scale * s.sign_map[i]
+                    any_active = True
+
+            new_offset = list(self._offset)
+            for i in range(6):
+                new_offset[i] += v[i] * dt
+
+            mx = s.max_excursion_xyz
+            mr = s.max_excursion_rpy
+            for i in range(3):
+                if new_offset[i] > mx:
+                    new_offset[i] = mx
+                elif new_offset[i] < -mx:
+                    new_offset[i] = -mx
+            for i in range(3, 6):
+                if new_offset[i] > mr:
+                    new_offset[i] = mr
+                elif new_offset[i] < -mr:
+                    new_offset[i] = -mr
+
+            self._offset = new_offset
+            self._state.offset = list(new_offset)
+
+            now = self._time()
+            if any_active:
+                self._last_nonidle_t = now
+            idle_s = now - self._last_nonidle_t
+            self._state.idle_seconds = idle_s
+
+            armed = self._armed
+            idle_timeout = self._settings.idle_auto_disarm_s
+            offset_snapshot = list(self._offset)
+
+        if armed:
+            try:
+                self._servo.set_target_offset(offset_snapshot)
+            except Exception as e:
+                log.warning("servo.set_target_offset failed: %s", e)
+
+            if idle_s >= idle_timeout:
+                log.info("SpaceMouse idle %.1fs → auto-disarm", idle_s)
+                self.disarm()
+
+    def notify_device_lost(self, reason: str):
+        """Called by the evdev thread (or tests) when the device goes away."""
+        with self._lock:
+            was_armed = self._armed
+            self._armed = False
+            self._state.armed = False
+            self._state.device_status = DeviceStatus.LOST
+            self._state.error = f"device lost: {reason}"
+            self._device_path = None
+        if was_armed:
+            try:
+                self._servo.emergency_stop()
+            except Exception as e:
+                log.warning("emergency_stop on device loss failed: %s", e)
+        log.warning("SpaceMouse device lost: %s", reason)
+
     # ── Internals ───────────────────────────────────────────────────
     def _safe_battery(self) -> Optional[int]:
         try:
