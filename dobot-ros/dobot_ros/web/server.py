@@ -2180,8 +2180,11 @@ def _get_spacemouse_reader():
                     "spacemouse settings invalid, falling back to defaults: %s", e)
                 settings = SpaceMouseSettings(**DEFAULT_SETTINGS)
 
+            # Pass the factory (not an instance) so the servo tester is only
+            # materialized when the operator actually arms — lets /state and
+            # the test page work even if servo tester construction would fail.
             _spacemouse_reader = SpaceMouseReader(
-                servo_tester=_get_servo_tester(),
+                servo_tester=_get_servo_tester,
                 ros_client=_get_client(),
                 settings=settings,
                 time_fn=_time.monotonic,

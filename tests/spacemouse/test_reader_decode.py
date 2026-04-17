@@ -89,6 +89,45 @@ def test_emergency_stop_uses_tester_estop(mock_servo, mock_ros):
     assert state.armed is False
 
 
+def test_factory_defers_servo_tester_until_arm(mock_servo, mock_ros):
+    """Reader accepts a zero-arg factory; it shouldn't invoke it until arm()."""
+    calls = {"n": 0}
+
+    def factory():
+        calls["n"] += 1
+        return mock_servo
+
+    reader = SpaceMouseReader(
+        servo_tester=factory, ros_client=mock_ros,
+        settings=SpaceMouseSettings(**DEFAULT_SETTINGS),
+        time_fn=lambda: 0.0,
+        find_device_fn=lambda: "/dev/input/event21",
+        open_device_fn=lambda p: None,
+        battery_fn=lambda: None,
+    )
+    assert calls["n"] == 0        # factory not called during construction
+    assert reader.snapshot().armed is False
+    reader.arm()
+    assert calls["n"] == 1
+
+
+def test_factory_failure_surfaces_as_arm_error(mock_servo, mock_ros):
+    def bad_factory():
+        raise RuntimeError("boom")
+
+    reader = SpaceMouseReader(
+        servo_tester=bad_factory, ros_client=mock_ros,
+        settings=SpaceMouseSettings(**DEFAULT_SETTINGS),
+        time_fn=lambda: 0.0,
+        find_device_fn=lambda: "/dev/input/event21",
+        open_device_fn=lambda p: None,
+        battery_fn=lambda: None,
+    )
+    ok, reason = reader.arm()
+    assert ok is False
+    assert "boom" in reason
+
+
 # ── Decode / deadband / sign-map tests ──────────────────────────────
 
 

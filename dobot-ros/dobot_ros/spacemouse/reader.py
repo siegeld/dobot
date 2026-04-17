@@ -30,7 +30,13 @@ log = logging.getLogger(__name__)
 
 
 class SpaceMouseReader:
-    """Owner of the SpaceMouse device + integration loop."""
+    """Owner of the SpaceMouse device + integration loop.
+
+    `servo_tester` may be either a ServoTester-like instance OR a zero-arg
+    factory callable. The factory form lets the reader be constructed early
+    (so the device thread + /state WebSocket work right away) while deferring
+    any side effects of building the real ServoTester to the first arm().
+    """
 
     def __init__(
         self,
@@ -42,7 +48,13 @@ class SpaceMouseReader:
         open_device_fn: Callable[[str], object],
         battery_fn: Callable[[], Optional[int]],
     ):
-        self._servo = servo_tester
+        # Factory vs. direct instance: heuristic is "has set_target_offset".
+        if hasattr(servo_tester, "set_target_offset"):
+            self._servo = servo_tester
+            self._servo_factory = None
+        else:
+            self._servo = None
+            self._servo_factory = servo_tester
         self._ros = ros_client
         self._settings = settings
         self._time = time_fn
@@ -82,6 +94,15 @@ class SpaceMouseReader:
                 self._state.error = "SpaceMouse not connected"
                 return False, "SpaceMouse not connected — check Bluetooth"
             self._device_path = path
+            # Lazy-construct the servo tester the first time we arm, so the
+            # reader/device thread/state endpoint work even when servo-tester
+            # construction would fail (e.g. stale table_plane format).
+            if self._servo is None:
+                try:
+                    self._servo = self._servo_factory()
+                except Exception as e:
+                    log.exception("servo tester factory failed")
+                    return False, f"servo tester unavailable: {e}"
             try:
                 status = self._servo.start()
                 anchor = list(getattr(status, "anchor_pose", []) or [])
@@ -119,10 +140,11 @@ class SpaceMouseReader:
         with self._lock:
             self._armed = False
             self._offset = [0.0] * 6
-            try:
-                self._servo.emergency_stop()
-            except Exception as e:
-                log.warning("servo.emergency_stop() failed: %s", e)
+            if self._servo is not None:
+                try:
+                    self._servo.emergency_stop()
+                except Exception as e:
+                    log.warning("servo.emergency_stop() failed: %s", e)
             self._state.armed = False
             self._state.offset = [0.0] * 6
             self._state.error = "emergency stop"
