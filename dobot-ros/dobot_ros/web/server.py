@@ -1640,6 +1640,17 @@ _SETTINGS_DEFAULTS = {
     "gripper": {"force": 20, "speed": 50},
     "jog": {"linear_step": 5, "angular_step": 5, "speed": 5, "mode": "user"},
     "pick_strategy": {"active": "simple_top_down"},
+    "spacemouse": {
+        "max_velocity_xyz": 80.0,
+        "max_velocity_rpy": 30.0,
+        "deadband": 0.10,
+        "sign_map": [1, 1, 1, 1, 1, 1],
+        "max_excursion_xyz": 300.0,
+        "max_excursion_rpy": 90.0,
+        "idle_auto_disarm_s": 30.0,
+        "button_debounce_ms": 150,
+        "gripper_force": 20,
+    },
 }
 
 # Legacy per-file JSON paths migrate into the store on first startup.
@@ -2132,6 +2143,144 @@ async def settings_import_saved(bundle: dict):
         return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
 
 
+# ── SpaceMouse pendant (additive) ─────────────────────────────────
+#
+# Drives the same ServoTester the /api/servo/* endpoints use, so the robot
+# motion path is unchanged. The reader thread converts 3Dconnexion SpaceMouse
+# Wireless BT deflections into rate-controlled target offsets and feeds them
+# into ServoTester.set_target_offset. Buttons on the puck drive the gripper.
+#
+# See docs/superpowers/specs/2026-04-17-spacemouse-pendant-design.md.
+
+_spacemouse_reader = None
+_spacemouse_lock = threading.Lock()
+
+
+def _get_spacemouse_reader():
+    global _spacemouse_reader
+    with _spacemouse_lock:
+        if _spacemouse_reader is None:
+            from dobot_ros.spacemouse.reader import SpaceMouseReader
+            from dobot_ros.spacemouse.hid_state import (
+                DEFAULT_SETTINGS, SpaceMouseSettings,
+            )
+            from dobot_ros.spacemouse.device import (
+                find_device, open_device, read_battery_pct,
+            )
+            import time as _time
+
+            cfg_dict = {**DEFAULT_SETTINGS, **_settings_store.get("spacemouse")}
+            try:
+                settings = SpaceMouseSettings(**{
+                    k: v for k, v in cfg_dict.items()
+                    if k in DEFAULT_SETTINGS
+                })
+            except ValueError as e:
+                logging.warning(
+                    "spacemouse settings invalid, falling back to defaults: %s", e)
+                settings = SpaceMouseSettings(**DEFAULT_SETTINGS)
+
+            _spacemouse_reader = SpaceMouseReader(
+                servo_tester=_get_servo_tester(),
+                ros_client=_get_client(),
+                settings=settings,
+                time_fn=_time.monotonic,
+                find_device_fn=find_device,
+                open_device_fn=open_device,
+                battery_fn=read_battery_pct,
+            )
+            _spacemouse_reader.start_threads(tick_hz=50.0)
+
+            def _on_spacemouse_change(new_cfg: dict):
+                try:
+                    merged = {**DEFAULT_SETTINGS, **new_cfg}
+                    _spacemouse_reader.update_settings(SpaceMouseSettings(**{
+                        k: v for k, v in merged.items() if k in DEFAULT_SETTINGS
+                    }))
+                except Exception:
+                    logging.exception("failed to apply spacemouse settings update")
+
+            _settings_store.subscribe("spacemouse", _on_spacemouse_change)
+        return _spacemouse_reader
+
+
+@app.post("/api/spacemouse/arm")
+async def spacemouse_arm():
+    """Arm the SpaceMouse. Refuses if motion is already active."""
+    reader = _get_spacemouse_reader()
+    blocked = _acquire_motion("spacemouse")
+    if blocked is not None:
+        return {"success": False, "error": blocked}
+    ok, reason = reader.arm()
+    if not ok:
+        _release_motion()
+        return {"success": False, "error": reason}
+    return {"success": True, "state": reader.snapshot().to_dict()}
+
+
+@app.post("/api/spacemouse/disarm")
+async def spacemouse_disarm():
+    reader = _get_spacemouse_reader()
+    try:
+        reader.disarm()
+    finally:
+        with _motion_lock:
+            global _motion_active
+            if _motion_active == "spacemouse":
+                _motion_active = None
+    return {"success": True, "state": reader.snapshot().to_dict()}
+
+
+@app.post("/api/spacemouse/estop")
+async def spacemouse_estop():
+    reader = _get_spacemouse_reader()
+    try:
+        reader.emergency_stop()
+    finally:
+        with _motion_lock:
+            global _motion_active
+            if _motion_active == "spacemouse":
+                _motion_active = None
+    return {"success": True, "state": reader.snapshot().to_dict()}
+
+
+@app.get("/api/spacemouse/state")
+async def spacemouse_state():
+    reader = _get_spacemouse_reader()
+    return {"success": True, "state": reader.snapshot().to_dict()}
+
+
+@app.get("/api/spacemouse/settings")
+async def spacemouse_settings_get():
+    return {"success": True, "settings": _settings_store.get("spacemouse")}
+
+
+class SpaceMouseSettingsRequest(BaseModel):
+    max_velocity_xyz: Optional[float] = None
+    max_velocity_rpy: Optional[float] = None
+    deadband: Optional[float] = None
+    sign_map: Optional[List[int]] = None
+    max_excursion_xyz: Optional[float] = None
+    max_excursion_rpy: Optional[float] = None
+    idle_auto_disarm_s: Optional[float] = None
+    button_debounce_ms: Optional[int] = None
+    gripper_force: Optional[int] = None
+
+
+@app.post("/api/spacemouse/settings")
+async def spacemouse_settings_post(req: SpaceMouseSettingsRequest):
+    current = _settings_store.get("spacemouse")
+    patch = {k: v for k, v in req.dict().items() if v is not None}
+    merged = {**current, **patch}
+    try:
+        from dobot_ros.spacemouse.hid_state import SpaceMouseSettings as _SS
+        _SS(**merged)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    _settings_store.patch("spacemouse", patch)
+    return {"success": True, "settings": _settings_store.get("spacemouse")}
+
+
 # ── WebSocket ───────────────────────────────────────────────────
 
 @app.websocket("/ws/state")
@@ -2176,6 +2325,22 @@ async def ws_state(websocket: WebSocket):
         _ws_clients.discard(websocket)
 
 
+@app.websocket("/ws/spacemouse")
+async def ws_spacemouse(websocket: WebSocket):
+    """10 Hz SpaceMouse state stream (HID echo + armed/offset/anchor)."""
+    await websocket.accept()
+    try:
+        reader = _get_spacemouse_reader()
+        while True:
+            snap = reader.snapshot().to_dict()
+            await websocket.send_json(snap)
+            await asyncio.sleep(0.1)  # 10 Hz
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+
+
 # ── Static files ────────────────────────────────────────────────
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -2199,6 +2364,11 @@ async def index():
 @app.get("/pendant")
 async def pendant():
     return FileResponse(str(STATIC_DIR / "pendant.html"), headers=_NO_CACHE_HEADERS)
+
+
+@app.get("/spacemouse")
+async def spacemouse_page():
+    return FileResponse(str(STATIC_DIR / "spacemouse.html"), headers=_NO_CACHE_HEADERS)
 
 
 @app.middleware("http")
