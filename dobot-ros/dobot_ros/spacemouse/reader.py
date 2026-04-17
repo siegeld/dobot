@@ -48,7 +48,8 @@ class SpaceMouseReader:
         self._offset: List[float] = [0.0] * 6
         self._last_raw: List[float] = [0.0] * 6
         self._buttons: List[bool] = [False, False]
-        self._last_button_edge: List[float] = [0.0, 0.0]
+        # -inf so the first edge never debounces against a pretend "previous" edge.
+        self._last_button_edge: List[float] = [float("-inf"), float("-inf")]
         self._last_nonidle_t: float = 0.0
         self._device_path: Optional[str] = None
         self._armed: bool = False
@@ -119,6 +120,70 @@ class SpaceMouseReader:
             self._state.offset = [0.0] * 6
             self._state.error = "emergency stop"
             log.warning("SpaceMouse E-stop")
+
+    # ── Event ingestion (driven by evdev thread OR by tests) ────────
+    def set_axis_absmax(self, absmax_per_axis: List[int]):
+        """Record the raw range for normalization. Called once after device open."""
+        if len(absmax_per_axis) != 6:
+            raise ValueError("absmax_per_axis must have 6 entries")
+        with self._lock:
+            self._abs_max = list(absmax_per_axis)
+
+    def on_raw_axis(self, axis_index: int, raw_value: int):
+        """Ingest one axis event. axis_index in [0..5]: 0..2 = TX/TY/TZ, 3..5 = RX/RY/RZ."""
+        if not 0 <= axis_index <= 5:
+            return
+        with self._lock:
+            amax = self._abs_max[axis_index] if self._abs_max else 350
+            norm = raw_value / float(amax) if amax else 0.0
+            if norm > 1.0:
+                norm = 1.0
+            elif norm < -1.0:
+                norm = -1.0
+            self._last_raw[axis_index] = norm
+            self._state.axes = list(self._last_raw)
+
+    def on_button(self, button_index: int, pressed: bool):
+        """Ingest one button event. button_index in {0, 1}."""
+        if button_index not in (0, 1):
+            return
+        with self._lock:
+            was = self._buttons[button_index]
+            self._buttons[button_index] = bool(pressed)
+            self._state.buttons = list(self._buttons)
+            if pressed and not was:
+                now = self._time()
+                debounce_s = self._settings.button_debounce_ms / 1000.0
+                if now - self._last_button_edge[button_index] < debounce_s:
+                    return
+                self._last_button_edge[button_index] = now
+                self._last_nonidle_t = now
+                if self._armed:
+                    self._fire_gripper(button_index)
+
+    def effective_velocity(self) -> List[float]:
+        """Compute the current 6-D velocity command (with deadband + sign map).
+
+        Units: mm/s for indices 0..2, deg/s for 3..5.
+        """
+        with self._lock:
+            s = self._settings
+            v = [0.0] * 6
+            for i in range(6):
+                a = self._last_raw[i]
+                if abs(a) < s.deadband:
+                    continue
+                scale = s.max_velocity_xyz if i < 3 else s.max_velocity_rpy
+                v[i] = a * scale * s.sign_map[i]
+            return v
+
+    def _fire_gripper(self, button_index: int):
+        position = 0 if button_index == 0 else 1000
+        force = self._settings.gripper_force
+        try:
+            self._ros.gripper_move(position, force=force, speed=50, wait=False)
+        except Exception as e:
+            log.warning("gripper_move(%d) failed: %s", position, e)
 
     # ── Internals ───────────────────────────────────────────────────
     def _safe_battery(self) -> Optional[int]:

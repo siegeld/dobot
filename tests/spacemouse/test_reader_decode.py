@@ -87,3 +87,101 @@ def test_emergency_stop_uses_tester_estop(mock_servo, mock_ros):
     assert mock_servo.emergency_stop_calls == 1
     state = reader.snapshot()
     assert state.armed is False
+
+
+# ── Decode / deadband / sign-map tests ──────────────────────────────
+
+
+def test_normalize_by_absinfo_max(mock_servo, mock_ros):
+    reader, _ = _make_reader(mock_servo, mock_ros)
+    reader.set_axis_absmax([350] * 6)
+    reader.on_raw_axis(axis_index=0, raw_value=175)
+    s = reader.snapshot()
+    assert abs(s.axes[0] - 0.5) < 1e-6
+
+
+def test_normalize_clips_above_one(mock_servo, mock_ros):
+    reader, _ = _make_reader(mock_servo, mock_ros)
+    reader.set_axis_absmax([350] * 6)
+    reader.on_raw_axis(axis_index=2, raw_value=10_000)
+    s = reader.snapshot()
+    assert s.axes[2] == 1.0
+
+
+def test_normalize_clips_below_minus_one(mock_servo, mock_ros):
+    reader, _ = _make_reader(mock_servo, mock_ros)
+    reader.set_axis_absmax([350] * 6)
+    reader.on_raw_axis(axis_index=2, raw_value=-10_000)
+    s = reader.snapshot()
+    assert s.axes[2] == -1.0
+
+
+def test_deadband_zeroes_small_deflections(mock_servo, mock_ros):
+    reader, _ = _make_reader(mock_servo, mock_ros, deadband=0.10)
+    reader.set_axis_absmax([350] * 6)
+    reader.on_raw_axis(axis_index=0, raw_value=int(0.05 * 350))
+    assert reader.effective_velocity()[0] == 0.0
+    reader.on_raw_axis(axis_index=0, raw_value=int(0.20 * 350))
+    assert reader.effective_velocity()[0] > 0.0
+
+
+def test_sign_map_flips_velocity(mock_servo, mock_ros):
+    reader, _ = _make_reader(mock_servo, mock_ros, sign_map=[-1, 1, 1, 1, 1, 1])
+    reader.set_axis_absmax([350] * 6)
+    reader.on_raw_axis(axis_index=0, raw_value=350)
+    v = reader.effective_velocity()
+    assert v[0] < 0.0
+
+
+def test_velocity_uses_max_velocity_from_settings(mock_servo, mock_ros):
+    reader, _ = _make_reader(mock_servo, mock_ros, max_velocity_xyz=80.0, max_velocity_rpy=30.0)
+    reader.set_axis_absmax([350] * 6)
+    reader.on_raw_axis(axis_index=0, raw_value=350)
+    reader.on_raw_axis(axis_index=5, raw_value=350)
+    v = reader.effective_velocity()
+    assert abs(v[0] - 80.0) < 1e-6
+    assert abs(v[5] - 30.0) < 1e-6
+
+
+def test_button_press_edge_armed_triggers_gripper(mock_servo, mock_ros):
+    reader, advance = _make_reader(mock_servo, mock_ros)
+    reader.arm()
+    reader.on_button(0, pressed=True)
+    assert len(mock_ros.gripper_moves) == 1
+    assert mock_ros.gripper_moves[0]["position"] == 0
+
+
+def test_button_press_edge_disarmed_is_echoed_but_no_action(mock_servo, mock_ros):
+    reader, _ = _make_reader(mock_servo, mock_ros)
+    reader.on_button(0, pressed=True)
+    assert mock_ros.gripper_moves == []
+    s = reader.snapshot()
+    assert s.buttons[0] is True
+
+
+def test_button_debounce_drops_rapid_repeats(mock_servo, mock_ros):
+    reader, advance = _make_reader(mock_servo, mock_ros, button_debounce_ms=150)
+    reader.arm()
+    reader.on_button(0, pressed=True)
+    advance(0.050)
+    reader.on_button(0, pressed=False)
+    reader.on_button(0, pressed=True)
+    assert len(mock_ros.gripper_moves) == 1
+    advance(0.200)
+    reader.on_button(0, pressed=False)
+    reader.on_button(0, pressed=True)
+    assert len(mock_ros.gripper_moves) == 2
+
+
+def test_button_open_maps_to_1000(mock_servo, mock_ros):
+    reader, _ = _make_reader(mock_servo, mock_ros)
+    reader.arm()
+    reader.on_button(1, pressed=True)
+    assert mock_ros.gripper_moves[-1]["position"] == 1000
+
+
+def test_button_close_maps_to_0(mock_servo, mock_ros):
+    reader, _ = _make_reader(mock_servo, mock_ros)
+    reader.arm()
+    reader.on_button(0, pressed=True)
+    assert mock_ros.gripper_moves[-1]["position"] == 0
