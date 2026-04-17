@@ -11,3 +11,10 @@ venv/
 TCP-IP-ROS-6Axis/
 dobot_cr/
 dobot_cr_controller.egg-info/
+
+# Runtime-written settings & camera state are owned by the in-container root
+# user; excluding them keeps `docker compose build` from hitting xattr errors
+# while reading the build context.
+dobot-ros/dobot_ros/web/settings/
+dobot-ros/dobot_ros/web/camera_state.json
+dobot-ros/dobot_ros/web/table_plane.json

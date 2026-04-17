@@ -6,9 +6,10 @@ test environments that don't have python3-evdev installed — tests replace
 """
 from __future__ import annotations
 
+import glob
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from dobot_ros.spacemouse.hid_state import VENDOR_ID, PRODUCT_ID
 
@@ -23,15 +24,31 @@ except ImportError:  # pragma: no cover
 _DEFAULT_POWER_SUPPLY = Path("/sys/class/power_supply")
 
 
+def _candidate_event_paths() -> List[str]:
+    """Glob /dev/input/event* directly — bypasses evdev.list_devices() which
+    requires write access (python-evdev's is_device() checks R_OK | W_OK, and
+    we mount /dev/input read-only in Docker)."""
+    if evdev is not None and hasattr(evdev, "list_devices"):
+        # In tests, our FakeEvdev.list_devices() returns the scripted set —
+        # prefer it so test fixtures keep working.
+        try:
+            paths = list(evdev.list_devices())
+            if paths:
+                return paths
+        except Exception:
+            pass
+    return sorted(glob.glob("/dev/input/event*"))
+
+
 def find_device() -> Optional[str]:
     """Return the /dev/input/event* path for the SpaceMouse, or None."""
     if evdev is None:
         log.warning("evdev not available; cannot scan for SpaceMouse")
         return None
     try:
-        paths = evdev.list_devices()
+        paths = _candidate_event_paths()
     except Exception as e:
-        log.warning("evdev.list_devices() failed: %s", e)
+        log.warning("scanning /dev/input/event* failed: %s", e)
         return None
     for path in paths:
         try:

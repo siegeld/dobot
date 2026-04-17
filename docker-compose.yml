@@ -21,8 +21,20 @@ services:
       - ./dobot-ros:/dobot-ros
       - ./docker/fastrtps_profile.xml:/fastrtps_profile.xml:ro
       - dobot-shared:/tmp/dobot-shared
+      # SpaceMouse pendant: bind-mount /dev/input so the container can
+      # discover the device by vendor/product even across BT reconnects.
+      # Read-only — evdev doesn't write to event nodes.
+      - /dev/input:/dev/input:ro
     stdin_open: true
     tty: true
+    # Allow reads on all character devices with major 13 (input class) —
+    # this covers /dev/input/event*, mouse*, and js* nodes. No write access.
+    device_cgroup_rules:
+      - 'c 13:* r'
+    # Membership in the host's 'input' group lets the container user read
+    # the event nodes. Discover with: getent group input | cut -d: -f3.
+    group_add:
+      - "${INPUT_GID:-104}"
 
   # Driver service - connects to robot and exposes ROS2 services
   # Python lifecycle manager waits for robot, launches vendor driver,
