@@ -841,6 +841,65 @@
             <code>table_plane.json</code> are applied to every commanded pose.
           </div>
 
+          <!-- SpaceMouse diagnostic echo (read-only) — present only when a puck is connected. -->
+          <link href="/static/css/spacemouse.css" rel="stylesheet">
+          <div class="card mb-2 sm-diag" id="sm-diag-card" style="display:none">
+            <div class="card-body p-2">
+              <div class="d-flex justify-content-between align-items-center small text-muted">
+                <span>SpaceMouse: <span id="sm-diag-status">—</span></span>
+                <span>
+                  <span id="sm-diag-btn0" class="sm-dot" style="display:inline-block"></span>
+                  <span id="sm-diag-btn1" class="sm-dot" style="display:inline-block"></span>
+                </span>
+                <a class="small" href="/spacemouse">open pendant →</a>
+              </div>
+              <div class="sm-axis-bars mt-1">
+                <div class="sm-axis" data-axis="0"><span class="sm-label">TX</span><div class="sm-bar-track"><div class="sm-bar-fill"></div></div></div>
+                <div class="sm-axis" data-axis="1"><span class="sm-label">TY</span><div class="sm-bar-track"><div class="sm-bar-fill"></div></div></div>
+                <div class="sm-axis" data-axis="2"><span class="sm-label">TZ</span><div class="sm-bar-track"><div class="sm-bar-fill"></div></div></div>
+                <div class="sm-axis" data-axis="3"><span class="sm-label">RX</span><div class="sm-bar-track"><div class="sm-bar-fill"></div></div></div>
+                <div class="sm-axis" data-axis="4"><span class="sm-label">RY</span><div class="sm-bar-track"><div class="sm-bar-fill"></div></div></div>
+                <div class="sm-axis" data-axis="5"><span class="sm-label">RZ</span><div class="sm-bar-track"><div class="sm-bar-fill"></div></div></div>
+              </div>
+            </div>
+          </div>
+          <script>
+          (function () {
+            const card = document.getElementById('sm-diag-card');
+            if (!card) return;
+            function setDot(el, on) {
+              el.style.background = on ? '#dc3545' : '#444';
+              el.style.boxShadow = on ? '0 0 6px #dc3545' : 'inset 0 0 3px rgba(0,0,0,0.6)';
+            }
+            function apply(s) {
+              const status = s.device_status || 'disconnected';
+              if (status === 'connected' || status === 'lost') {
+                card.style.display = '';
+              }
+              document.getElementById('sm-diag-status').textContent = status + (s.armed ? ' · armed' : '');
+              setDot(document.getElementById('sm-diag-btn0'), !!(s.buttons && s.buttons[0]));
+              setDot(document.getElementById('sm-diag-btn1'), !!(s.buttons && s.buttons[1]));
+              for (let i = 0; i < 6; i++) {
+                const row = card.querySelector(`.sm-axis[data-axis="${i}"]`);
+                if (!row) continue;
+                const v = (s.axes && s.axes[i]) || 0;
+                const fill = row.querySelector('.sm-bar-fill');
+                const pct = Math.min(100, Math.abs(v) * 100);
+                if (v >= 0) { fill.style.left = '50%'; fill.style.width = (pct/2) + '%'; }
+                else { fill.style.left = (50 - pct/2) + '%'; fill.style.width = (pct/2) + '%'; }
+              }
+            }
+            function connect() {
+              const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+              const ws = new WebSocket(`${proto}://${location.host}/ws/spacemouse`);
+              ws.onmessage = (ev) => { try { apply(JSON.parse(ev.data)); } catch (e) {} };
+              ws.onclose = () => setTimeout(connect, 2000);
+              ws.onerror = () => {};
+            }
+            connect();
+          })();
+          </script>
+
           <div class="row g-2">
             <div class="col-md-4">
               <div class="card">
