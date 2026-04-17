@@ -19,6 +19,13 @@ from dobot_ros.spacemouse.hid_state import (
     DeviceStatus, HidState, SpaceMouseSettings,
 )
 
+try:
+    import evdev as _evdev
+    from evdev import ecodes as _ecodes
+except ImportError:  # pragma: no cover - test environments stub these
+    _evdev = None
+    _ecodes = None
+
 log = logging.getLogger(__name__)
 
 
@@ -255,6 +262,136 @@ class SpaceMouseReader:
             except Exception as e:
                 log.warning("emergency_stop on device loss failed: %s", e)
         log.warning("SpaceMouse device lost: %s", reason)
+
+    # ── Threads ─────────────────────────────────────────────────────
+    def start_threads(self, tick_hz: float = 50.0):
+        """Start the evdev read thread and the integration tick thread."""
+        if getattr(self, "_stop_event", None) is not None:
+            return
+        self._stop_event = threading.Event()
+        self._tick_hz = tick_hz
+        self._open_device_obj = None
+        self._tick_thread = threading.Thread(
+            target=self._tick_loop, name="spacemouse-tick", daemon=True)
+        self._read_thread = threading.Thread(
+            target=self._read_loop, name="spacemouse-read", daemon=True)
+        self._tick_thread.start()
+        self._read_thread.start()
+
+    def stop_threads(self, timeout: float = 2.0):
+        """Stop both threads. Idempotent."""
+        ev = getattr(self, "_stop_event", None)
+        if ev is None:
+            return
+        ev.set()
+        try:
+            self.disarm()
+        except Exception:
+            pass
+        try:
+            dev = getattr(self, "_open_device_obj", None)
+            if dev is not None:
+                try:
+                    dev.close()
+                except Exception:
+                    pass
+        finally:
+            self._tick_thread.join(timeout=timeout)
+            self._read_thread.join(timeout=timeout)
+            self._stop_event = None
+            self._tick_thread = None
+            self._read_thread = None
+            self._open_device_obj = None
+
+    # Background loops ------------------------------------------------
+
+    def _tick_loop(self):
+        period = 1.0 / max(1.0, self._tick_hz)
+        last = self._time()
+        while not self._stop_event.is_set():
+            now = self._time()
+            dt = max(1e-4, now - last)
+            last = now
+            try:
+                self.tick_once(dt=dt)
+            except Exception:
+                log.exception("spacemouse tick failed")
+            self._stop_event.wait(timeout=period)
+
+    def _read_loop(self):
+        while not self._stop_event.is_set():
+            path = self._find_device()
+            if path is None:
+                self._stop_event.wait(timeout=1.0)
+                continue
+            try:
+                dev = self._open_device(path)
+            except PermissionError:
+                with self._lock:
+                    self._state.device_status = DeviceStatus.PERMISSION_DENIED
+                    self._state.error = "permission denied on /dev/input (check input group)"
+                return
+            except Exception as e:
+                log.warning("open_device(%s) failed: %s", path, e)
+                self._stop_event.wait(timeout=1.0)
+                continue
+            self._open_device_obj = dev
+            self._discover_absinfo(dev)
+            with self._lock:
+                self._state.device_status = DeviceStatus.CONNECTED
+                self._state.error = None
+                self._device_path = path
+            try:
+                self._pump_events(dev)
+            except OSError as e:
+                self.notify_device_lost(str(e))
+            except Exception as e:
+                log.exception("read loop crashed: %s", e)
+                self.notify_device_lost(str(e))
+            finally:
+                try:
+                    dev.close()
+                except Exception:
+                    pass
+
+    def _pump_events(self, dev):
+        if _ecodes is None:
+            return
+        axis_code_map = {
+            _ecodes.ABS_X: 0, _ecodes.ABS_Y: 1, _ecodes.ABS_Z: 2,
+            _ecodes.ABS_RX: 3, _ecodes.ABS_RY: 4, _ecodes.ABS_RZ: 5,
+        }
+        button_code_map = {_ecodes.BTN_0: 0, _ecodes.BTN_1: 1}
+        ev_abs = _ecodes.EV_ABS
+        ev_key = _ecodes.EV_KEY
+        for ev in dev.read_loop():
+            if self._stop_event.is_set():
+                return
+            etype = ev.type
+            if etype == ev_abs:
+                idx = axis_code_map.get(ev.code)
+                if idx is not None:
+                    self.on_raw_axis(idx, ev.value)
+            elif etype == ev_key:
+                idx = button_code_map.get(ev.code)
+                if idx is not None:
+                    self.on_button(idx, pressed=bool(ev.value))
+
+    def _discover_absinfo(self, dev):
+        if _ecodes is None:
+            if not self._abs_max:
+                self.set_axis_absmax([350] * 6)
+            return
+        axes = [_ecodes.ABS_X, _ecodes.ABS_Y, _ecodes.ABS_Z,
+                _ecodes.ABS_RX, _ecodes.ABS_RY, _ecodes.ABS_RZ]
+        maxes: List[int] = []
+        for code in axes:
+            try:
+                info = dev.absinfo(code)
+                maxes.append(int(info.max) if info and info.max else 350)
+            except Exception:
+                maxes.append(350)
+        self.set_axis_absmax(maxes)
 
     # ── Internals ───────────────────────────────────────────────────
     def _safe_battery(self) -> Optional[int]:

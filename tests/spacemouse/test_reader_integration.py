@@ -153,3 +153,32 @@ def test_snapshot_offset_matches_last_commanded(mock_servo, mock_ros):
         r.tick_once(dt=0.02)
     s = r.snapshot()
     assert abs(s.offset[0] - 80.0 * 0.02 * 5) < 1e-3
+
+
+import time as real_time
+
+
+def test_run_spins_both_threads_and_stops_cleanly(mock_servo, mock_ros, fake_evdev_with_spacemouse, monkeypatch):
+    from dobot_ros.spacemouse import reader as reader_mod
+
+    monkeypatch.setattr(reader_mod, "_evdev", fake_evdev_with_spacemouse)
+    monkeypatch.setattr(reader_mod, "_ecodes", fake_evdev_with_spacemouse.ecodes)
+
+    r = reader_mod.SpaceMouseReader(
+        servo_tester=mock_servo, ros_client=mock_ros,
+        settings=SpaceMouseSettings(**DEFAULT_SETTINGS),
+        time_fn=real_time.monotonic,
+        find_device_fn=lambda: "/dev/input/event21",
+        open_device_fn=lambda path: fake_evdev_with_spacemouse.InputDevice(path),
+        battery_fn=lambda: None,
+    )
+    r.start_threads(tick_hz=100.0)
+    try:
+        r.arm()
+        real_time.sleep(0.15)
+        r.disarm()
+    finally:
+        r.stop_threads(timeout=1.0)
+
+    assert mock_servo.start_calls == 1
+    assert mock_servo.stop_calls == 1
