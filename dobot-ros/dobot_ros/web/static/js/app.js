@@ -2246,7 +2246,7 @@
         <tbody>${rows}</tbody>
       </table>`;
     } catch (e) {
-      el.innerHTML = `<span class="text-danger">Failed to load: ${e}</span>`;
+      el.textContent = `Failed to load: ${e}`;
     }
   }
 

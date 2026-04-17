@@ -299,7 +299,7 @@ class GripperNode(Node):
         pos = goal_request.position
         speed = goal_request.speed
         force = goal_request.force
-        if pos > 1000 or speed < 1 or speed > 100 or force < 20 or force > 100:
+        if pos < 0 or pos > 1000 or speed < 1 or speed > 100 or force < 20 or force > 100:
             self.get_logger().error(f'Rejecting: invalid params pos={pos} speed={speed} force={force}')
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT

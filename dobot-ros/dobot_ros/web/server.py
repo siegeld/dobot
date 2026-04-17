@@ -787,6 +787,7 @@ def _get_min_clearance_mm() -> float:
 @app.post("/api/calibration/workspace-move")
 def workspace_move(req: dict):
     """Move robot to a workspace position (center or corner) at given height above table."""
+    # Pre-flight validation (before acquiring the motion lock).
     try:
         data = json.loads(_TABLE_FILE.read_text()) if _TABLE_FILE.exists() else {}
         pts = data.get("points", [])
@@ -816,22 +817,22 @@ def workspace_move(req: dict):
             return {"success": False, "error": "plane normal Z component too small — recalibrate"}
         table_z = -(normal[0] * target_xy[0] + normal[1] * target_xy[1] + d) / normal[2]
         target_z = table_z + height_mm
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
-        blocked = _acquire_motion("workspace_move")
-        if blocked:
-            return {"success": False, "error": blocked}
+    # Acquire motion lock BEFORE the try block so the finally only releases
+    # if we actually acquired it. (Bug fix: previously _release_motion in
+    # the finally could release another stream's lock on early return.)
+    blocked = _acquire_motion("workspace_move")
+    if blocked:
+        return {"success": False, "error": blocked}
 
-        client = _get_client()
+    client = _get_client()
+    try:
         client.set_speed_factor(5)
-
-        # height_mm is above table for gripper tip
-        # Table Z is in wrist coords (gripper tip touches table at this Z)
-        # So wrist target = table_z + height_mm (no gripper offset needed
-        # because table was calibrated by touching gripper tip to table)
         # L-shaped path: move UP first (safe clearance), then XY, then DOWN.
-        # A straight diagonal could pass through the table or obstacles.
         current = client.get_cartesian_pose()
-        safe_z = max(current[2], target_z) + 50.0  # 50mm above the higher of current/target
+        safe_z = max(current[2], target_z) + 50.0
         dz_up = safe_z - current[2]
         if dz_up > 1.0:
             client.jog(z=dz_up, wait=True, timeout=10.0)
@@ -853,9 +854,10 @@ def workspace_move(req: dict):
         return {"success": False, "error": str(e)}
     finally:
         try:
-            _release_motion()
+            client.stop()
         except Exception:
             pass
+        _release_motion()
 
 
 @app.get("/api/calibration/depth-at")
@@ -1611,15 +1613,9 @@ def _release_motion():
         _motion_active = None
 
 
-# Keep old names for backward compat in case any code references them.
-def _check_motion_free(mode: str) -> Optional[str]:
-    return _acquire_motion(mode)
-
-def _set_motion_active(mode: Optional[str]):
-    if mode is None:
-        _release_motion()
-    else:
-        _acquire_motion(mode)
+    # No backward-compat wrappers — _acquire_motion / _release_motion are
+    # the only correct API. Old _check_motion_free / _set_motion_active
+    # had a TOCTOU race and were removed.
 
 
 # ── Settings store (single source of truth for persistent UI + VLA + servo config) ─
@@ -1652,19 +1648,22 @@ _SETTINGS_LEGACY = {
     "camera_view": Path(__file__).parent / "camera_state.json",
 }
 
-# Initialize eagerly but guard against import-time failures so tests
-# that import this module don't crash (the store creates dirs + starts
-# a writer thread, which is fine in the Docker container but may fail
-# in a bare-metal test environment).
+# Initialize eagerly. If it fails (e.g., permission error in a test
+# environment), create a minimal in-memory fallback so callers never
+# see None. The fallback won't persist to disk but won't crash.
 try:
-    _settings_store: Optional[SettingsStore] = SettingsStore(
+    _settings_store: SettingsStore = SettingsStore(
         base_dir=_SETTINGS_DIR,
         defaults=_SETTINGS_DEFAULTS,
         legacy_files=_SETTINGS_LEGACY,
     )
 except Exception as _init_err:
-    logging.warning("SettingsStore init failed (will retry on first use): %s", _init_err)
-    _settings_store = None
+    logging.warning("SettingsStore init failed — using in-memory fallback: %s", _init_err)
+    import tempfile as _tf
+    _settings_store = SettingsStore(
+        base_dir=Path(_tf.mkdtemp(prefix="dobot_settings_")),
+        defaults=_SETTINGS_DEFAULTS,
+    )
 
 
 def _settings_load_safety_check():
