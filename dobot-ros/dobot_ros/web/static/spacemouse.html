@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dobot CR5 — SpaceMouse</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="/static/css/dashboard.css" rel="stylesheet">
+  <link href="/static/css/spacemouse.css" rel="stylesheet">
+</head>
+<body class="bg-body text-body">
+
+<nav class="navbar navbar-expand navbar-dark bg-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/"><i class="bi bi-robot"></i> Dobot CR5</a>
+    <a class="nav-link" href="/">Dashboard</a>
+    <a class="nav-link active" href="/spacemouse">SpaceMouse</a>
+  </div>
+</nav>
+
+<div class="container py-3" id="sm-root">
+
+  <div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+    <h3 class="mb-0 me-3">SpaceMouse Wireless BT</h3>
+    <span id="sm-device-pill" class="badge rounded-pill bg-secondary">
+      <i class="bi bi-circle"></i> <span id="sm-device-status">Disconnected</span>
+    </span>
+    <span id="sm-battery" class="ms-2 text-muted small" style="display:none">
+      <i class="bi bi-battery-half"></i> <span id="sm-battery-pct">—</span>%
+    </span>
+    <span id="sm-armed-pill" class="ms-2 badge rounded-pill bg-danger" style="display:none">
+      <i class="bi bi-record-fill"></i> Armed
+    </span>
+  </div>
+
+  <div id="sm-banner" class="alert" style="display:none" role="alert"></div>
+
+  <div class="d-flex gap-3 mb-3">
+    <button id="sm-arm-btn" class="btn btn-success btn-lg flex-fill" disabled>
+      <i class="bi bi-power"></i> Arm
+    </button>
+    <button id="sm-disarm-btn" class="btn btn-secondary btn-lg flex-fill" style="display:none">
+      <i class="bi bi-power"></i> Disarm
+    </button>
+    <button id="sm-estop-btn" class="btn btn-danger btn-lg flex-fill">
+      <i class="bi bi-octagon-fill"></i> E-STOP (Esc)
+    </button>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header">Anchor pose</div>
+        <div class="card-body font-monospace small" id="sm-anchor">
+          <em class="text-muted">not armed</em>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header">Offset from anchor</div>
+        <div class="card-body font-monospace small" id="sm-offset">
+          X <span data-offset="0">0.0</span> mm
+          &nbsp;&nbsp; Y <span data-offset="1">0.0</span> mm
+          &nbsp;&nbsp; Z <span data-offset="2">0.0</span> mm<br>
+          RX <span data-offset="3">0.0</span>°
+          &nbsp;&nbsp; RY <span data-offset="4">0.0</span>°
+          &nbsp;&nbsp; RZ <span data-offset="5">0.0</span>°
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-header d-flex justify-content-between">
+      <span>Live HID (always visible — this is your test page)</span>
+      <small class="text-muted" id="sm-event-age">— ms</small>
+    </div>
+    <div class="card-body">
+      <div class="sm-axis-bars">
+        <div class="sm-axis" data-axis="0"><span class="sm-label">TX</span><div class="sm-bar-track"><div class="sm-bar-fill"></div></div><span class="sm-val">0.00</span></div>
+        <div class="sm-axis" data-axis="1"><span class="sm-label">TY</span><div class="sm-bar-track"><div class="sm-bar-fill"></div></div><span class="sm-val">0.00</span></div>
+        <div class="sm-axis" data-axis="2"><span class="sm-label">TZ</span><div class="sm-bar-track"><div class="sm-bar-fill"></div></div><span class="sm-val">0.00</span></div>
+        <div class="sm-axis" data-axis="3"><span class="sm-label">RX</span><div class="sm-bar-track"><div class="sm-bar-fill"></div></div><span class="sm-val">0.00</span></div>
+        <div class="sm-axis" data-axis="4"><span class="sm-label">RY</span><div class="sm-bar-track"><div class="sm-bar-fill"></div></div><span class="sm-val">0.00</span></div>
+        <div class="sm-axis" data-axis="5"><span class="sm-label">RZ</span><div class="sm-bar-track"><div class="sm-bar-fill"></div></div><span class="sm-val">0.00</span></div>
+      </div>
+      <div class="d-flex gap-4 mt-3 align-items-center">
+        <div class="sm-btn-indicator" data-btn="0">
+          <span class="sm-dot"></span> BTN 0 (Close)
+        </div>
+        <div class="sm-btn-indicator" data-btn="1">
+          <span class="sm-dot"></span> BTN 1 (Open)
+        </div>
+        <small class="text-muted" id="sm-button-note" style="display:none">
+          no gripper action while disarmed
+        </small>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <button class="btn btn-link text-decoration-none p-0" data-bs-toggle="collapse" data-bs-target="#sm-settings">
+        <i class="bi bi-sliders"></i> Settings
+      </button>
+    </div>
+    <div id="sm-settings" class="collapse">
+      <div class="card-body">
+        <form id="sm-settings-form" class="row g-2 small">
+          <label class="col-md-4">Max vel XYZ (mm/s)<input name="max_velocity_xyz" type="number" step="1" class="form-control form-control-sm"></label>
+          <label class="col-md-4">Max vel RPY (°/s)<input name="max_velocity_rpy" type="number" step="1" class="form-control form-control-sm"></label>
+          <label class="col-md-4">Deadband<input name="deadband" type="number" step="0.01" class="form-control form-control-sm"></label>
+          <label class="col-md-4">Max excursion XYZ (mm)<input name="max_excursion_xyz" type="number" step="1" class="form-control form-control-sm"></label>
+          <label class="col-md-4">Max excursion RPY (°)<input name="max_excursion_rpy" type="number" step="1" class="form-control form-control-sm"></label>
+          <label class="col-md-4">Idle auto-disarm (s)<input name="idle_auto_disarm_s" type="number" step="1" class="form-control form-control-sm"></label>
+          <label class="col-md-6">Button debounce (ms)<input name="button_debounce_ms" type="number" step="10" class="form-control form-control-sm"></label>
+          <label class="col-md-6">Gripper force (%)<input name="gripper_force" type="number" step="5" min="0" max="100" class="form-control form-control-sm"></label>
+          <fieldset class="col-12">
+            <legend class="small text-muted mb-1">Sign map (per-axis ±1)</legend>
+            <div id="sm-sign-map" class="d-flex gap-2 flex-wrap"></div>
+          </fieldset>
+          <div class="col-12"><button type="submit" class="btn btn-primary btn-sm">Save</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/static/js/spacemouse.js"></script>
+</body>
+</html>

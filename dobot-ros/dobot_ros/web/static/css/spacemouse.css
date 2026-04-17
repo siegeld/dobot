@@ -1,0 +1,72 @@
+.sm-axis {
+  display: grid;
+  grid-template-columns: 40px 1fr 70px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.sm-label {
+  font-weight: 600;
+  font-family: monospace;
+}
+.sm-bar-track {
+  position: relative;
+  height: 16px;
+  background: #333;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.sm-bar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 0%;
+  background: #0d6efd;
+  transition: width 0.05s linear, left 0.05s linear;
+}
+.sm-val {
+  text-align: right;
+  font-family: monospace;
+  font-size: 0.9em;
+}
+.sm-axis[data-deadband="true"] .sm-bar-fill {
+  background: #6c757d;
+}
+
+.sm-btn-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: monospace;
+}
+.sm-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #444;
+  display: inline-block;
+  box-shadow: inset 0 0 3px rgba(0, 0, 0, 0.6);
+}
+.sm-btn-indicator[data-active="true"] .sm-dot {
+  background: #dc3545;
+  box-shadow: 0 0 8px #dc3545;
+}
+
+#sm-arm-btn:disabled { opacity: 0.6; }
+
+.sm-sign-toggle { display: inline-flex; }
+.sm-sign-toggle button { width: 52px; font-family: monospace; }
+
+/* Diagnostic echo card on the main dashboard — smaller bars */
+.sm-diag .sm-axis {
+  grid-template-columns: 28px 1fr;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+.sm-diag .sm-bar-track {
+  height: 8px;
+}
+.sm-diag .sm-label {
+  font-size: 0.8em;
+}
