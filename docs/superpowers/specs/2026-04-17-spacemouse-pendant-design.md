@@ -51,9 +51,9 @@ to `ServoTester`, no changes to `ros_client.py`.
 
 ## Architecture
 
-New module `dobot-ros/dobot_ros/pendant/` sibling of `servo/`, `vla/`:
+New module `dobot-ros/dobot_ros/spacemouse/` sibling of `servo/`, `vla/`:
 
-- `spacemouse.py` — `SpaceMouseReader` (evdev reader + integration loop).
+- `reader.py` — `SpaceMouseReader` (evdev reader + integration loop).
 - `hid_state.py` — `HidState` dataclass (6 axes, 2 buttons, battery,
   armed/idle, device status, last_event_age_ms).
 - `__init__.py`.
@@ -160,7 +160,7 @@ warning banner below 15 %.
 1. **Not armed = no motion.** Default state is disarmed. Deflection is
    read and echoed, but `set_target_offset` is never called and buttons
    do nothing.
-2. **Arm gates.** `POST /api/pendant/arm` refuses if:
+2. **Arm gates.** `POST /api/spacemouse/arm` refuses if:
    - robot not in `ENABLE` (mode 5) — must be enabled and idle;
    - any other motion is active (`_motion_active` lock already in
      `web/server.py`);
@@ -192,23 +192,23 @@ E-stop and device-disconnect call `ros.stop()`.
 
 ## API surface (new)
 
-All under the `/api/pendant/` prefix in `dobot_ros/web/server.py`:
+All under the `/api/spacemouse/` prefix in `dobot_ros/web/server.py`:
 
 | Method | Path                  | Body / Params                         | Effect                                                                                   |
 |--------|-----------------------|---------------------------------------|------------------------------------------------------------------------------------------|
-| POST   | `/api/pendant/arm`    | `{}`                                  | Check gates → start `ServoTester` → start reader; returns anchor pose or 400 with reason |
-| POST   | `/api/pendant/disarm` | `{}`                                  | Stop reader → stop `ServoTester`; robot holds last pose                                  |
-| POST   | `/api/pendant/estop`  | `{}`                                  | Proxies to `servo_estop()` (halt stream + `ros.stop()`); always allowed                  |
-| GET    | `/api/pendant/state`  | —                                     | Current `HidState` snapshot (polling fallback for WS)                                    |
-| GET    | `/api/pendant/settings` | —                                   | Read current pendant settings                                                            |
-| POST   | `/api/pendant/settings` | `{...}`                             | Update and persist via existing `_settings_store`                                        |
-| WS     | `/ws/pendant`         | —                                     | Live `HidState` stream at 10 Hz (downsampled from the 50 Hz internal state)              |
+| POST   | `/api/spacemouse/arm`    | `{}`                                  | Check gates → start `ServoTester` → start reader; returns anchor pose or 400 with reason |
+| POST   | `/api/spacemouse/disarm` | `{}`                                  | Stop reader → stop `ServoTester`; robot holds last pose                                  |
+| POST   | `/api/spacemouse/estop`  | `{}`                                  | Proxies to `servo_estop()` (halt stream + `ros.stop()`); always allowed                  |
+| GET    | `/api/spacemouse/state`  | —                                     | Current `HidState` snapshot (polling fallback for WS)                                    |
+| GET    | `/api/spacemouse/settings` | —                                   | Read current pendant settings                                                            |
+| POST   | `/api/spacemouse/settings` | `{...}`                             | Update and persist via existing `_settings_store`                                        |
+| WS     | `/ws/spacemouse`         | —                                     | Live `HidState` stream at 10 Hz (downsampled from the 50 Hz internal state)              |
 
 ### Arm flow
 
 ```
 user clicks "Arm"
-  → POST /api/pendant/arm
+  → POST /api/spacemouse/arm
   → check gates (mode, motion lock, device present, no VLA)
   → _motion_active = "pendant"
   → ServoTester.start()           # captures current pose as anchor
@@ -246,7 +246,11 @@ the existing `ServoTester` pattern.
 
 ## Web UI
 
-### Pendant page (new tab `/pendant`)
+### SpaceMouse page (new tab `/spacemouse`)
+
+> **Name note:** the existing `pendant.html` / `pendant.js` / `pendant.css`
+> are a different thing — the mobile touch-based teach pendant. We use
+> the `spacemouse` namespace throughout to avoid collision.
 
 Single-column layout. The **Live HID** panel is visible whether armed
 or disarmed — it *is* the test page.
@@ -299,7 +303,7 @@ Behavior:
 
 Small read-only card added to the servo-tester page: 6 tiny axis bars,
 2 button dots, device status pill. No arm button, no settings. Uses
-the same `/ws/pendant` stream. Purpose: help verify the puck during
+the same `/ws/spacemouse` stream. Purpose: help verify the puck during
 ServoP tuning without context-switching tabs.
 
 ### Frontend stack
@@ -337,8 +341,8 @@ Jazzy's base image; no pip needed.)
 
 ### Startup behavior
 
-- Device absent at startup → web server boots normally; `GET /api/pendant/state`
-  returns `{device: "not_found"}`; `POST /api/pendant/arm` returns 400
+- Device absent at startup → web server boots normally; `GET /api/spacemouse/state`
+  returns `{device: "not_found"}`; `POST /api/spacemouse/arm` returns 400
   with a reason. No crash loop.
 - No BT / no SpaceMouse at all → Pendant tab shows "disconnected" forever;
   nothing else breaks.
@@ -382,21 +386,26 @@ Four tiers, mirroring the existing `servo/tester.py` test approach:
 ### New
 
 ```
-dobot-ros/dobot_ros/pendant/__init__.py
-dobot-ros/dobot_ros/pendant/hid_state.py
-dobot-ros/dobot_ros/pendant/spacemouse.py
-dobot-ros/dobot_ros/web/static/pendant.html
-dobot-ros/dobot_ros/web/static/js/pendant.js
-dobot-ros/dobot_ros/web/static/css/pendant.css
-tests/test_pendant_spacemouse.py
-docs/pendant-bringup.md
+dobot-ros/dobot_ros/spacemouse/__init__.py
+dobot-ros/dobot_ros/spacemouse/hid_state.py
+dobot-ros/dobot_ros/spacemouse/reader.py
+dobot-ros/dobot_ros/web/static/spacemouse.html
+dobot-ros/dobot_ros/web/static/js/spacemouse.js
+dobot-ros/dobot_ros/web/static/css/spacemouse.css
+tests/spacemouse/__init__.py
+tests/spacemouse/conftest.py
+tests/spacemouse/test_reader.py
+tests/spacemouse/test_state_machine.py
+tests/spacemouse/test_integration.py
+docs/spacemouse-bringup.md
 ```
 
 ### Modified
 
 ```
-dobot-ros/dobot_ros/web/server.py    (add /api/pendant/* routes, /ws/pendant, settings group, nav link)
-dobot-ros/dobot_ros/web/static/index.html   (nav link; HID echo card on servo page)
+dobot-ros/dobot_ros/web/server.py    (add /api/spacemouse/* routes, /ws/spacemouse, settings group, /spacemouse FileResponse, nav link)
+dobot-ros/dobot_ros/web/static/index.html   (nav link to SpaceMouse page)
+dobot-ros/dobot_ros/web/static/servo.html   (small HID echo card — if servo tester has its own page; otherwise add to index.html servo section)
 docker-compose.yml                   (devices + group_add)
 docker/Dockerfile                    (python3-evdev)
 .env.example                         (INPUT_GID)
