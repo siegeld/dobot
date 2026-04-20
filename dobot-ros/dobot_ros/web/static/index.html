@@ -109,6 +109,15 @@
             <input type="range" class="form-range" id="speed-slider" min="1" max="100" value="5">
           </div>
 
+          <div class="mt-2 d-flex align-items-center gap-2" data-bs-toggle="tooltip" data-bs-html="true"
+               title="Active robot tool coordinate system.<br><b>Wrist</b> (Tool 0): pose is the flange. SpaceMouse rotations pivot around the wrist; fingertip swings on a 203mm arc.<br><b>Fingertip</b> (Tool 1): pose is the defined tool tip (e.g. AG-105 with 203mm Z). Rotations pivot around the fingertip; floor guard shifts to the fingertip frame.">
+            <label class="form-label form-label-sm mb-0">Tool frame</label>
+            <select class="form-select form-select-sm flex-fill" id="tool-select">
+              <option value="0">Wrist (Tool 0)</option>
+              <option value="1">Fingertip (Tool 1)</option>
+            </select>
+          </div>
+
           <div class="mt-2">
             <table class="table table-sm table-borderless mb-0 info-table">
               <tr><td class="text-muted">Mode</td><td id="info-mode">--</td></tr>

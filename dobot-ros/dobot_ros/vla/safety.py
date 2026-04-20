@@ -40,11 +40,25 @@ class SafetyLimits:
     rz_max: float = 180.0
 
     @classmethod
-    def from_table_plane(cls, path: Path, margin_mm: float = 10.0) -> "SafetyLimits":
+    def from_table_plane(
+        cls,
+        path: Path,
+        margin_mm: float = 10.0,
+        tool_length_mm: float = 0.0,
+    ) -> "SafetyLimits":
         """Build limits from a table_plane.json calibration file.
 
-        The table plane defines the floor Z and workspace XY bounds. We add
-        a configurable margin above the table for minimum Z clearance.
+        The table corners are recorded as the **wrist/flange** pose when the
+        gripper tip was touching the table (see CLAUDE.md). Therefore:
+
+          actual_table_z (fingertip frame) ≈ wrist_corner_z − tool_length_mm
+
+        `tool_length_mm` selects which frame the floor is expressed in:
+          * 0.0  → commanded poses are in WRIST frame (Tool 0 default).
+                   z_min = max(corner_wrist_z) + margin_mm.
+          * N    → commanded poses are in FINGERTIP frame (Tool N with
+                   length N mm). z_min = max(corner_wrist_z) − N + margin_mm
+                   so the fingertip can't go below the table surface.
         """
         lims = cls()
         try:
@@ -60,8 +74,10 @@ class SafetyLimits:
             zs = [c["z"] if isinstance(c, dict) else c[2] for c in corners]
             lims.x_min, lims.x_max = min(xs), max(xs)
             lims.y_min, lims.y_max = min(ys), max(ys)
-            # Z_min is the highest corner plus margin (so we never drop the gripper below the table).
-            lims.z_min = max(zs) + margin_mm
+            # Max corner Z is the highest point of the table surface in wrist coords.
+            # Subtract the tool length when the active tool has shifted the reported
+            # frame to the fingertip, so the floor is correct in that frame.
+            lims.z_min = max(zs) - float(tool_length_mm) + float(margin_mm)
         return lims
 
 

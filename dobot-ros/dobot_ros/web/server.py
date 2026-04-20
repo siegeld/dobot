@@ -52,6 +52,8 @@ _state = {
     "gripper_state": -1,
     "gripper_initialized": False,
     "speed_factor": -1,
+    # 0 = flange/wrist (default). 1 = fingertip (Tool(1), e.g. AG-105 + 203mm tip).
+    "tool_index": 0,
     "last_update": 0,
     "uptime_start": 0,
     "error": None,
@@ -109,7 +111,37 @@ def _get_client() -> DobotRosClient:
             logging.info("startup set_speed_factor(%d) deferred: %s", stored, e)
         with _lock:
             _state["speed_factor"] = stored
+
+        # Apply the persisted tool frame on first connect. Default 0
+        # (flange / wrist). If Tool(N) fails (e.g. workspace-protection
+        # error 1479) we fall back to 0 and log — the UI reads the final
+        # value back from _state["tool_index"].
+        try:
+            tool_idx = int(_settings_store.get("tool").get("active_index", 0))
+        except Exception:
+            tool_idx = 0
+        actual_tool = _apply_tool(_client, tool_idx, fallback=0)
+        with _lock:
+            _state["tool_index"] = actual_tool
     return _client
+
+
+def _apply_tool(client, index: int, fallback: int = 0) -> int:
+    """Call Tool(index) on the robot. On failure, try `fallback` and return
+    whichever tool is actually active after. Doesn't raise."""
+    try:
+        client.set_tool(int(index))
+        logging.info("Tool frame active: %d", index)
+        return int(index)
+    except Exception as e:
+        logging.warning("Tool(%d) failed: %s — falling back to Tool(%d)", index, e, fallback)
+        if int(index) == int(fallback):
+            return int(index)  # don't retry same
+        try:
+            client.set_tool(int(fallback))
+        except Exception as e2:
+            logging.error("Tool(%d) fallback also failed: %s", fallback, e2)
+        return int(fallback)
 
 
 def _poll_state():
@@ -249,6 +281,7 @@ async def get_status():
             "gripper_state": _state["gripper_state"],
             "gripper_initialized": _state["gripper_initialized"],
             "speed_factor": _state["speed_factor"],
+            "tool_index": _state["tool_index"],
             "uptime_seconds": int(uptime),
             "last_update": _state["last_update"],
             "error": _state["error"],
@@ -336,6 +369,60 @@ def stop_drag():
         res = client.stop_drag()
         return {"success": True, "result": res}
     except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+class ToolRequest(BaseModel):
+    index: int
+
+
+@app.get("/api/tool")
+def get_tool():
+    """Current active tool index + known tool lengths (for the floor guard)."""
+    try:
+        tool_cfg = _settings_store.get("tool") or {}
+    except Exception:
+        tool_cfg = {}
+    return {
+        "active_index": _state.get("tool_index", 0),
+        "tool_length_mm": float(tool_cfg.get("tool_length_mm", 203.0)),
+    }
+
+
+@app.post("/api/tool")
+def set_tool(req: ToolRequest):
+    """Activate a pre-configured tool coordinate system on the robot.
+
+    Index 0 means flange/wrist (default). Index ≥1 corresponds to a tool
+    defined on the robot controller (e.g. 1 for the AG-105 with a 203mm
+    tool-Z offset). ServoP / cartesian pose reporting switches to that
+    frame until Tool(0) is reselected. The servo tester's floor guard
+    also recomputes so the fingertip can't enter the table when Tool(N)
+    is active.
+    """
+    try:
+        client = _get_client()
+        idx = int(req.index)
+        client.set_tool(idx)
+        with _lock:
+            _state["tool_index"] = idx
+        _settings_store.patch("tool", {"active_index": idx})
+        # Rebuild floor guard for the active frame so a running ServoTester
+        # immediately enforces fingertip-aware limits.
+        try:
+            tool_cfg = _settings_store.get("tool") or {}
+            tool_length_mm = float(tool_cfg.get("tool_length_mm", 203.0)) if idx != 0 else 0.0
+            tp = _settings_store.get("table_plane")
+            if _servo_tester is not None and tp and (tp.get("corners") or tp.get("points")):
+                tp_file = _SETTINGS_DIR / "table_plane_for_tester.json"
+                tp_file.write_text(json.dumps(tp))
+                _servo_tester.limits = SafetyLimits.from_table_plane(tp_file, tool_length_mm=tool_length_mm)
+                logging.info("ServoTester floor guard updated for tool %d (length %.1fmm)", idx, tool_length_mm)
+        except Exception as e:
+            logging.warning("re-applying floor guard for tool %d failed: %s", idx, e)
+        return {"success": True, "active_index": idx}
+    except Exception as e:
+        logging.warning("set_tool(%d) failed: %s", int(req.index), e)
         return {"success": False, "error": str(e)}
 
 
@@ -1881,13 +1968,23 @@ def _get_servo_tester():
             # Workspace limits from the store's table_plane group (falls back
             # to the legacy file if that's all we have).
             tp = _settings_store.get("table_plane")
+            # Active tool shifts the floor frame: Tool(0) = wrist, Tool(N) =
+            # fingertip (subtract tool length from the wrist-recorded corner
+            # Z so the fingertip can't enter the table).
+            try:
+                tool_cfg = _settings_store.get("tool") or {}
+            except Exception:
+                tool_cfg = {}
+            tool_length_mm = float(tool_cfg.get("tool_length_mm", 203.0)) \
+                if int(_state.get("tool_index", 0)) != 0 else 0.0
             if tp and (tp.get("corners") or tp.get("points")):
                 tp_file = _SETTINGS_DIR / "table_plane_for_tester.json"
                 tp_file.write_text(json.dumps(tp))
-                limits = SafetyLimits.from_table_plane(tp_file)
+                limits = SafetyLimits.from_table_plane(tp_file, tool_length_mm=tool_length_mm)
             else:
                 legacy = Path(__file__).parent / "table_plane.json"
-                limits = SafetyLimits.from_table_plane(legacy) if legacy.exists() else SafetyLimits()
+                limits = (SafetyLimits.from_table_plane(legacy, tool_length_mm=tool_length_mm)
+                          if legacy.exists() else SafetyLimits())
 
             _servo_tester = ServoTester(
                 ros_client=_get_client(), config=cfg, limits=limits,

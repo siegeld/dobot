@@ -432,6 +432,38 @@
       robotCommand(`Speed ${speed}%`, 'speed', 'POST', { speed });
     });
 
+    // Tool-frame selector. Sets the robot's active tool coordinate system
+    // (Tool 0 = wrist/flange, Tool 1 = fingertip). Reads current value
+    // on load and pushes to /api/tool on change. Any failure (e.g.
+    // workspace-protection error on switch to Tool 1) is surfaced via
+    // the usual toast + activity log.
+    const toolSelect = $('#tool-select');
+    if (toolSelect) {
+      (async () => {
+        try {
+          const r = await fetch('/api/tool');
+          const j = await r.json();
+          if (typeof j.active_index === 'number') toolSelect.value = String(j.active_index);
+        } catch (_) { /* keep HTML default */ }
+      })();
+      toolSelect.addEventListener('change', async () => {
+        const index = parseInt(toolSelect.value, 10);
+        const label = toolSelect.options[toolSelect.selectedIndex].textContent;
+        const res = await api('tool', 'POST', { index });
+        if (res.success) {
+          logActivity(`Tool frame → ${label}`, 'info');
+        } else {
+          showToast(`Tool switch failed: ${res.error}`, 'danger');
+          // Try to resync from the server so the dropdown reflects actual state.
+          try {
+            const r = await fetch('/api/tool');
+            const j = await r.json();
+            if (typeof j.active_index === 'number') toolSelect.value = String(j.active_index);
+          } catch (_) {}
+        }
+      });
+    }
+
     // Jog speed slider
     const jogSpeedSlider = $('#jog-speed');
     jogSpeedSlider.addEventListener('input', () => {

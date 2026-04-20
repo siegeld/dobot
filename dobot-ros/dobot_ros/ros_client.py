@@ -36,6 +36,7 @@ from dobot_msgs_v4.srv import (
     StartDrag,
     StopDrag,
     Stop,
+    Tool,
 )
 
 
@@ -133,6 +134,8 @@ class DobotRosClient(Node):
             ServoP, f'{self._srv_prefix}ServoP')
         self._servo_j_client = self.create_client(
             ServoJ, f'{self._srv_prefix}ServoJ')
+        self._tool_client = self.create_client(
+            Tool, f'{self._srv_prefix}Tool')
 
         # ── Gripper node clients ────────────────────────────────
         self._gripper_init_client = self.create_client(
@@ -319,6 +322,24 @@ class DobotRosClient(Node):
         request = SpeedFactor.Request()
         request.ratio = speed
         response = self._call_service(self._speed_factor_client, request)
+        return response.res
+
+    def set_tool(self, index: int) -> int:
+        """Activate a tool coordinate system (pre-configured on the robot).
+
+        After Tool(0) the robot's reported cartesian pose is the **flange /
+        wrist** in base frame. After Tool(N) (N ≥ 1, N must exist on the
+        robot controller) the reported pose is the origin of that tool's
+        defined frame — for the AG-105 with tool 1 set to {0,0,203,0,0,0}
+        that's the fingertip.
+
+        Raises TimeoutError if the Tool service is unavailable, RuntimeError
+        on a non-zero response code. Caller should wrap + fall back to 0 if
+        workspace-protection errors occur during the switch.
+        """
+        request = Tool.Request()
+        request.index = int(index)
+        response = self._call_service(self._tool_client, request)
         return response.res
 
     def inverse_kin(self, pose: List[float]) -> List[float]:
