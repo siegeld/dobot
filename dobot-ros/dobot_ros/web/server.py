@@ -133,16 +133,23 @@ def _poll_state():
                     _state["robot_mode"] = mode
                     _state["connected"] = not stale
                     _state["error"] = "Robot feedback stale — robot may be offline" if stale else None
-                    # Driver watchdog DISABLED 2026-04-20: SIGTERM'ing the
-                    # ROS node leaves the robot's 29999 session-tracking
-                    # table confused (fd-leak bug in vendor tcp_socket.cpp
-                    # disConnect() means FIN never reaches the robot). Each
-                    # triggered restart degrades the command path; after 2–3
-                    # fires the command socket is permanently unusable until
-                    # the robot is power-cycled. See ISSUES.md / git history.
-                    # If feedback goes stale we just surface it via _state
-                    # and rely on the driver wrapper's own check_robot loop
-                    # (driver.py) to restart only on real robot unreachability.
+                    # Driver watchdog: signal the driver container to restart
+                    # the ROS node when the feedback port (30004) goes stale.
+                    # Previously this interacted badly with a vendor fd-leak
+                    # in tcp_socket.cpp disConnect() — SIGTERM'ing the node
+                    # left orphan sockets in the robot's 29999 session table,
+                    # so successive restarts bricked the command path. That
+                    # leak is now fixed (close-before-nullify), so the
+                    # watchdog is re-enabled.
+                    if stale:
+                        try:
+                            restart_file = Path("/tmp/dobot-shared/driver_restart")
+                            if not restart_file.exists():
+                                restart_file.parent.mkdir(parents=True, exist_ok=True)
+                                restart_file.touch()
+                                logging.warning("Feedback stale — signaled driver restart via %s", restart_file)
+                        except Exception as wdog_err:
+                            logging.debug("watchdog signal failed: %s", wdog_err)
                     _state["last_update"] = time.time()
                 except Exception as e:
                     _state["connected"] = False
@@ -1979,14 +1986,20 @@ async def servo_pattern(req: ServoPatternRequest):
         return {"success": False, "error": str(e)}
 
 
+_SERVO_CONFIG_KEYS = (
+    "servo_rate_hz", "t", "aheadtime", "gain",
+    "max_velocity_xyz", "max_velocity_rpy",
+    "idle_timeout_s",
+)
+
+
 @app.post("/api/servo/config")
 async def servo_config(req: dict):
     try:
         # Route config updates through the settings store — this both persists
         # the value to last_settings.json and notifies the running tester via
         # the subscribe hook.
-        filtered = {k: v for k, v in req.items()
-                    if k in ("servo_rate_hz", "t", "aheadtime", "gain", "idle_timeout_s")}
+        filtered = {k: v for k, v in req.items() if k in _SERVO_CONFIG_KEYS}
         _settings_store.patch("servo", filtered)
         tester = _get_servo_tester()
         return {"success": True, "status": tester.status().__dict__}
@@ -2002,6 +2015,8 @@ _SERVO_TUNING_DEFAULTS = {
     "t": 0.05,
     "gain": 500.0,
     "aheadtime": 50.0,
+    "max_velocity_xyz": 100.0,
+    "max_velocity_rpy": 45.0,
 }
 
 

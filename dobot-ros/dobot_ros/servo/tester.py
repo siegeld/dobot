@@ -40,6 +40,17 @@ class ServoConfig:
     aheadtime: float = 50.0
     gain: float = 500.0
 
+    # Hard velocity caps applied inside the tick loop. The commanded offset
+    # advances toward whatever the caller/pattern sets as the target offset
+    # at most max_velocity_*_step per tick (= max_velocity_* × dt). This is
+    # the ONLY guaranteed bound on servo-commanded motion: if a slider
+    # snaps from +50 mm to 0, or a pattern jumps, the cap still holds.
+    # XYZ is clamped as 3-vector magnitude so direction is preserved.
+    # RPY is clamped per-axis independently (pitch/roll/yaw are different
+    # physical degrees of freedom and don't share a magnitude constraint).
+    max_velocity_xyz: float = 100.0  # mm/s
+    max_velocity_rpy: float = 45.0   # deg/s
+
     # How long to keep streaming "hold" after the last target update before
     # giving up and parking. None = forever (stay in servo mode until stop()).
     idle_timeout_s: Optional[float] = None
@@ -97,6 +108,12 @@ class ServoTester:
         self._target_last_updated: float = 0.0
         self._pattern: Optional[Pattern] = None
         self._pattern_start_t: float = 0.0
+        # The offset we ACTUALLY command, distinct from _target_offset. The
+        # tick loop rate-limits advancement from here toward _target_offset
+        # at max_velocity_xyz / max_velocity_rpy. On any target change this
+        # lags until the cap has had time to carry us to the new target.
+        self._commanded_offset: List[float] = [0.0] * 6
+        self._last_tick_time: float = 0.0
 
         self._latencies: Deque[float] = collections.deque(maxlen=200)
         self._status = ServoStatus()
@@ -115,6 +132,8 @@ class ServoTester:
             self._target_offset = [0.0] * 6
             self._target_last_updated = time.time()
             self._pattern = None
+            self._commanded_offset = [0.0] * 6
+            self._last_tick_time = 0.0
             self._stop.clear()
             self._status = ServoStatus(running=True, anchor_pose=list(self._anchor))
             if self.log_csv_path:
@@ -179,6 +198,7 @@ class ServoTester:
     _CONFIG_TYPES = {
         "servo_rate_hz": float, "t": float,
         "aheadtime": float, "gain": float,
+        "max_velocity_xyz": float, "max_velocity_rpy": float,
         "idle_timeout_s": (float, type(None)),
     }
 
@@ -210,12 +230,48 @@ class ServoTester:
         consecutive_failures = 0
         MAX_CONSECUTIVE_FAILURES = 10
         try:
+            import math
             while not self._stop.is_set():
                 tick_start = time.perf_counter()
                 period = 1.0 / max(1.0, self.config.servo_rate_hz)
 
-                # Compute the commanded pose (anchor + current offset).
-                offset = self._current_offset()
+                # Compute this tick's dt for the velocity cap. First tick falls
+                # back to the nominal period since no prior tick exists.
+                if self._last_tick_time > 0.0:
+                    dt = max(1e-4, tick_start - self._last_tick_time)
+                else:
+                    dt = period
+                self._last_tick_time = tick_start
+
+                # Pull the desired target (jog offset or pattern output).
+                target = self._current_offset()
+
+                # Rate-limit: advance _commanded_offset toward target at
+                # most max_velocity_{xyz,rpy} × dt per tick. XYZ as vector
+                # magnitude so direction is preserved; RPY independently.
+                max_xyz_step = max(0.0, self.config.max_velocity_xyz) * dt
+                max_rpy_step = max(0.0, self.config.max_velocity_rpy) * dt
+                dx = target[0] - self._commanded_offset[0]
+                dy = target[1] - self._commanded_offset[1]
+                dz = target[2] - self._commanded_offset[2]
+                mag = math.sqrt(dx * dx + dy * dy + dz * dz)
+                if mag > max_xyz_step and mag > 0.0:
+                    scale = max_xyz_step / mag
+                    dx *= scale
+                    dy *= scale
+                    dz *= scale
+                self._commanded_offset[0] += dx
+                self._commanded_offset[1] += dy
+                self._commanded_offset[2] += dz
+                for i in range(3, 6):
+                    d = target[i] - self._commanded_offset[i]
+                    if d > max_rpy_step:
+                        d = max_rpy_step
+                    elif d < -max_rpy_step:
+                        d = -max_rpy_step
+                    self._commanded_offset[i] += d
+
+                offset = list(self._commanded_offset)
                 commanded = [self._anchor[i] + offset[i] for i in range(6)]
 
                 # Safety: clamp against workspace bounds.
