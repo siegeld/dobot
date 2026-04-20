@@ -1,0 +1,19 @@
+{
+  "name": "Dobot CR5 — Teach Pendant",
+  "short_name": "CR5 Pendant",
+  "description": "Tablet-style teach pendant for the Dobot CR5.",
+  "start_url": "/pendant",
+  "scope": "/pendant",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#212529",
+  "theme_color": "#212529",
+  "icons": [
+    {
+      "src": "/static/icons/pendant.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

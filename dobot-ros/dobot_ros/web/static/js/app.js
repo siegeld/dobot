@@ -952,7 +952,7 @@
     initVLA();
     initServoTester();
     initSettings();
-    initPendantModal();
+    initPopupButtons();
     initHashNav();
     initTooltips();
     initCalibrationTab();
@@ -2132,25 +2132,44 @@
     });
   }
 
-  // ── Pendant modal ─────────────────────────────────────────────
-  // Lazy-loads the /pendant page into an iframe on first open so the main
-  // dashboard doesn't pay the pendant's startup cost up front. Unloads the
-  // iframe on close so any polling/timers stop when the modal is hidden.
+  // ── Pendant / SpaceMouse popup windows ───────────────────────
+  // These open /pendant and /spacemouse in resizable OS-level browser
+  // windows so the main dashboard stays fully usable behind them.
+  // Reusing a fixed window name means a second click focuses the
+  // existing window instead of spawning a duplicate.
 
-  function initPendantModal() {
-    const modal = document.getElementById('pendantModal');
-    const frame = document.getElementById('pendantFrame');
-    if (!modal || !frame) return;
+  function openPopup(url, name, width, height) {
+    // popup=yes triggers chromeless window mode in Chromium/Firefox; the
+    // explicit no-chrome flags cover older browsers that honor them.
+    const features = [
+      'popup=yes',
+      `width=${width}`,
+      `height=${height}`,
+      'resizable=yes',
+      'scrollbars=yes',
+      'location=no',
+      'toolbar=no',
+      'menubar=no',
+      'status=no',
+      'directories=no',
+      'titlebar=no',
+    ].join(',');
+    const w = window.open(url, name, features);
+    if (w) { try { w.focus(); } catch (_) {} }
+    return w;
+  }
 
-    modal.addEventListener('show.bs.modal', () => {
-      // Append a cache-buster so edits to pendant.html show up without a
-      // manual hard-reload.
-      frame.src = '/pendant?t=' + Date.now();
-    });
-    modal.addEventListener('hidden.bs.modal', () => {
-      // Drop the iframe source so any intervals / WebSockets inside the
-      // pendant page are torn down.
-      frame.src = 'about:blank';
+  function initPopupButtons() {
+    const pBtn = document.getElementById('btn-open-pendant');
+    if (pBtn) pBtn.addEventListener('click', () => openPopup('/pendant', 'dobot-pendant', 900, 900));
+
+    const smBtn = document.getElementById('btn-open-spacemouse');
+    if (smBtn) smBtn.addEventListener('click', () => openPopup('/spacemouse', 'dobot-spacemouse', 525, 820));
+
+    const smLink = document.getElementById('link-open-spacemouse');
+    if (smLink) smLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      openPopup('/spacemouse', 'dobot-spacemouse', 525, 820);
     });
   }
 

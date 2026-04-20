@@ -1,0 +1,19 @@
+{
+  "name": "Dobot CR5 — SpaceMouse",
+  "short_name": "CR5 SpaceMouse",
+  "description": "SpaceMouse jog pendant for the Dobot CR5.",
+  "start_url": "/spacemouse",
+  "scope": "/spacemouse",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#212529",
+  "theme_color": "#212529",
+  "icons": [
+    {
+      "src": "/static/icons/spacemouse.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
