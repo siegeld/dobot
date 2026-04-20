@@ -399,6 +399,39 @@
     $('#btn-disable').addEventListener('click', () => robotCommand('Disable Robot', 'disable'));
     $('#btn-clear-error').addEventListener('click', () => robotCommand('Clear Error', 'clear'));
     $('#btn-stop').addEventListener('click', () => robotCommand('STOP', 'stop'));
+    $('#btn-orient-vertical').addEventListener('click',
+      () => robotCommand('Gripper vertical', 'orient/vertical'));
+
+    // Lock-vertical toggle. When on, the servo tester re-projects every
+    // ServoP target to RX=180, RY=0 so SpaceMouse jogging can't tip the
+    // tool off perpendicular. Persisted via /api/servo/config so it
+    // survives reloads / container restarts.
+    const lockChk = $('#chk-lock-vertical');
+    if (lockChk) {
+      (async () => {
+        try {
+          const r = await fetch('/api/servo/config');
+          const j = await r.json();
+          if (j.success && j.config && typeof j.config.lock_vertical === 'boolean') {
+            lockChk.checked = j.config.lock_vertical;
+          }
+        } catch (_) {}
+      })();
+      lockChk.addEventListener('change', async () => {
+        const res = await api('servo/config', 'POST', { lock_vertical: lockChk.checked });
+        if (res.success) {
+          logActivity(`Lock vertical: ${lockChk.checked ? 'ON' : 'off'}`, 'info');
+        } else {
+          showToast(`Lock toggle failed: ${res.error}`, 'danger');
+          // resync
+          try {
+            const r = await fetch('/api/servo/config');
+            const j = await r.json();
+            if (j.success && j.config) lockChk.checked = !!j.config.lock_vertical;
+          } catch (_) {}
+        }
+      });
+    }
 
     // Main drag toggle
     let mainDragActive = false;

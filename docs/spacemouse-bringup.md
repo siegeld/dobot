@@ -86,8 +86,31 @@ full design.
 - `docker compose restart dobot-web` → page reconnects over the WebSocket;
   device is rediscovered.
 
-## Known limits (v1)
+## Tool-frame jogging and pick workflow
 
-- World-frame only. Tool-frame jog is a planned follow-up.
+The main dashboard has a **Tool frame** dropdown (Robot Control card):
+
+- **Tool 0** — wrist / flange. Cartesian pose is the wrist; SpaceMouse
+  rotations pivot around the wrist and the fingertip swings on a 203 mm
+  arc.
+- **Tool 1** — fingertip (pre-configured on the robot controller as a
+  203 mm tool-Z offset). Cartesian pose is the fingertip; rotations
+  pivot around the fingertip; the floor guard shifts to the fingertip
+  frame so the tip can't enter the table.
+
+For top-down picks:
+
+1. Select **Tool 1** in the Tool-frame dropdown.
+2. Click **Vertical** in Robot Control (RX=180, RY=0, RZ preserved).
+3. Flip the **Lock** switch next to it. The servo tester now
+   force-projects every ServoP target to RX=180 / RY=0 and zeros the
+   puck's RX/RY velocity input. Translations (X/Y/Z) move the fingertip;
+   yaw (RZ) still works for jaw alignment; the gripper stays
+   perpendicular to the table regardless of drift or TCS re-solves.
+
+Turn **Lock** off any time to restore full 6-DoF jogging.
+
+## Known limits
+
 - No CLI; the web page is the only interface.
 - One puck at a time.

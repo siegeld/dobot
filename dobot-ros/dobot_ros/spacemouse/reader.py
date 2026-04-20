@@ -71,6 +71,10 @@ class SpaceMouseReader:
         self._state = HidState()
         self._offset: List[float] = [0.0] * 6
         self._last_raw: List[float] = [0.0] * 6
+        # Smoothed axis values — first-order IIR filter applied each tick
+        # at alpha = settings.axis_lpf_alpha. Used by the control path to
+        # remove HID micro-jitter without visibly lagging the puck.
+        self._axis_smoothed: List[float] = [0.0] * 6
         self._buttons: List[bool] = [False, False]
         # -inf so the first edge never debounces against a pretend "previous" edge.
         self._last_button_edge: List[float] = [float("-inf"), float("-inf")]
@@ -243,10 +247,19 @@ class SpaceMouseReader:
         """
         with self._lock:
             s = self._settings
+            # Low-pass filter axis values: smoothed[i] = α·raw + (1-α)·prev.
+            # α=1 disables (raw pass-through). Smooths HID micro-jitter
+            # that otherwise becomes velocity stutter through the chain.
+            alpha = max(1e-3, min(1.0, s.axis_lpf_alpha))
+            for i in range(6):
+                self._axis_smoothed[i] = (
+                    alpha * self._last_raw[i]
+                    + (1.0 - alpha) * self._axis_smoothed[i]
+                )
             v = [0.0] * 6
             any_active = False
             for i in range(6):
-                a = self._last_raw[i]
+                a = self._axis_smoothed[i]
                 if abs(a) >= s.deadband:
                     scale = s.max_velocity_xyz if i < 3 else s.max_velocity_rpy
                     v[i] = a * scale * s.sign_map[i]

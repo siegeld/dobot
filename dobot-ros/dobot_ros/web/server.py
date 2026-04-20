@@ -491,6 +491,30 @@ def move_joints(req: MoveJointsRequest):
         return {"success": False, "error": str(e)}
 
 
+@app.post("/api/orient/vertical")
+def orient_vertical():
+    """Reorient the tool so its Z axis points straight down at the world floor
+    (RX=180, RY=0), preserving current X/Y/Z and RZ. The pose is commanded in
+    the active tool frame, so in Tool(1) the fingertip stays pinned on the
+    table and the wrist swings around it; in Tool(0) the wrist stays pinned
+    and the fingertip swings on a 203mm arc."""
+    try:
+        throttled = _throttle_motion()
+        if throttled:
+            return {"success": False, "error": throttled}
+        client = _get_client()
+        pose = client.get_cartesian_pose()
+        if pose is None or len(pose) != 6:
+            return {"success": False, "error": "no cartesian pose available"}
+        target = [float(pose[0]), float(pose[1]), float(pose[2]),
+                  180.0, 0.0, float(pose[5])]
+        res = client.move_pose(target)
+        return {"success": True, "result": res, "target": target}
+    except Exception as e:
+        logging.warning("orient/vertical failed: %s", e)
+        return {"success": False, "error": str(e)}
+
+
 # ── Gripper API ─────────────────────────────────────────────────
 
 @app.post("/api/gripper/init")
@@ -2089,6 +2113,7 @@ _SERVO_CONFIG_KEYS = (
     "servo_rate_hz", "t", "aheadtime", "gain",
     "max_velocity_xyz", "max_velocity_rpy",
     "idle_timeout_s",
+    "lock_vertical",
 )
 
 
@@ -2116,6 +2141,7 @@ _SERVO_TUNING_DEFAULTS = {
     "aheadtime": 50.0,
     "max_velocity_xyz": 100.0,
     "max_velocity_rpy": 45.0,
+    "lock_vertical": False,
 }
 
 
@@ -2420,6 +2446,7 @@ class SpaceMouseSettingsRequest(BaseModel):
     idle_auto_disarm_s: Optional[float] = None
     button_debounce_ms: Optional[int] = None
     gripper_force: Optional[int] = None
+    axis_lpf_alpha: Optional[float] = None
 
 
 @app.post("/api/spacemouse/settings")

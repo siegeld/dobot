@@ -36,6 +36,9 @@ HTTP + WebSocket surface of the Dobot CR5 web dashboard. Served by
 | POST | `/api/speed` | `{speed: 1..100}` | SpeedFactor |
 | POST | `/api/jog` | `{axis, distance, speed?, mode?}` | Validated jog: axis in {j1..j6, x, y, z, rx, ry, rz}, distance ∈ [-500, 500], speed ∈ [1, 100], mode in {user, tool} |
 | POST | `/api/move_joints` | `{joints: [6]}` | Absolute joint move |
+| POST | `/api/orient/vertical` | — | MovJ keeping current X/Y/Z and RZ, setting RX=180 / RY=0 so the tool Z axis points straight down. In Tool 1 the fingertip stays pinned; in Tool 0 the wrist stays pinned |
+| GET | `/api/tool` | — | Active tool index + configured tool length (mm) used by the floor guard |
+| POST | `/api/tool` | `{index: int}` | Activate a preconfigured tool coordinate system (0 = flange/wrist, 1 = fingertip). Persists to settings store; ServoTester floor guard recomputes for the active tool length |
 
 ## Gripper
 
@@ -109,7 +112,7 @@ Gripper state is also pushed over the `/ws/state` stream at 5 Hz.
 | POST | `/api/servo/estop` | — | Stop + ros.stop() |
 | POST | `/api/servo/target` | `{offset: [6]}` | **Position mode** — set target offset; clears pattern |
 | POST | `/api/servo/pattern` | `{name, params}` | Start a pattern (circle / sine / square / lissajous) |
-| POST | `/api/servo/config` | `{servo_rate_hz?, t?, aheadtime?, gain?, max_velocity_xyz?, max_velocity_rpy?, idle_timeout_s?}` | Live tuning update; persists |
+| POST | `/api/servo/config` | `{servo_rate_hz?, t?, aheadtime?, gain?, max_velocity_xyz?, max_velocity_rpy?, idle_timeout_s?, lock_vertical?}` | Live tuning update; persists. `lock_vertical` (bool) forces every ServoP target to RX=180 / RY=0 and zeros puck RX/RY velocity |
 | GET | `/api/servo/config` | — | Current config + defaults (used by the UI's Reset button) |
 | GET | `/api/servo/status` | — | running, mode, step count, latency p50/p95, clamps/overruns, anchor, last commanded pose |
 
@@ -144,7 +147,7 @@ specific endpoints (e.g. `/api/servo/config`).
 | POST | `/api/spacemouse/estop` | — | Hard stop (ros.stop()) + disarm |
 | GET | `/api/spacemouse/state` | — | axes[6], buttons[2], device_status, armed, battery, offset, idle |
 | GET | `/api/spacemouse/settings` | — | Live settings |
-| POST | `/api/spacemouse/settings` | `{deadband?, sign_map?, max_velocity_xyz?, max_velocity_rpy?, …}` | Merge + validate + persist |
+| POST | `/api/spacemouse/settings` | `{deadband?, sign_map?, max_velocity_xyz?, max_velocity_rpy?, axis_lpf_alpha?, …}` | Merge + validate + persist. `axis_lpf_alpha` ∈ (0, 1] controls the first-order IIR smoothing on raw HID axes (1.0 = no filtering) |
 
 The reader self-disarms on idle timeout or device loss; its on-disarm
 hook also releases the server motion lock, so subsequent arms succeed.

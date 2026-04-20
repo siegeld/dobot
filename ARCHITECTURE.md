@@ -106,6 +106,32 @@ streams ServoP targets at up to 100 Hz. It has two input modes:
 
 Both modes share the same hard velocity cap and workspace-bounds clamp.
 
+**Lock vertical** (`ServoConfig.lock_vertical`) is an optional mode on
+top of either input path. When on, the tick loop zeroes RX/RY velocity
+before integration and force-projects the final commanded pose to
+RX=180, RY=0 before `servo_p`. This guarantees the tool Z axis points
+straight down regardless of puck noise, Euler-integration roundoff, or
+TCS re-solves near the vertical configuration. RZ (yaw) is untouched.
+Intended for top-down picks in Tool 1, where it keeps the gripper
+perpendicular to the table while the fingertip XY/Z tracks the puck.
+
+### Tool coordinate system
+The web dashboard lets the operator pick which tool the ServoTester /
+cartesian pose reporting operates in. The selection is applied via the
+`Tool` ROS service and persisted to the settings store:
+
+- **Tool 0** — flange / wrist. `[X,Y,Z,RX,RY,RZ]` is the wrist pose.
+  Rotations pivot around the wrist; a 203 mm gripper swings on an arc.
+- **Tool 1** — pre-configured on the robot controller (AG-105 with a
+  203 mm tool-Z offset). `[X,Y,Z,RX,RY,RZ]` is the fingertip pose.
+  Rotations pivot around the fingertip; the fingertip is the natural
+  frame for pick/place since it matches the calibrated table coordinates.
+
+The ServoTester's floor guard (`SafetyLimits.from_table_plane`) re-reads
+the configured `tool_length_mm` when the tool changes so the Z minimum
+matches the active tool — the fingertip cannot be driven into the table
+regardless of which tool is selected.
+
 ### Safety boundaries
 - **Workspace clamp** (`dobot_ros/vla/safety.py`) is the last thing before
   a pose hits ServoP: X/Y ±1500 mm, Z ≥ table + margin, Z ≤ 1500 mm, rots

@@ -101,6 +101,18 @@
             <button class="btn btn-info btn-sm flex-fill" id="btn-clear-error">Clear Error</button>
             <button class="btn btn-danger btn-sm flex-fill" id="btn-stop">STOP</button>
           </div>
+          <div class="d-flex gap-2 mb-2 align-items-center">
+            <button class="btn btn-outline-primary btn-sm flex-fill" id="btn-orient-vertical"
+                    data-bs-toggle="tooltip"
+                    title="Rotate the tool so it points straight down (RX=180, RY=0, current RZ). In Tool 1 the fingertip stays pinned on the table and the wrist swings around it. In Tool 0 the wrist stays pinned and the fingertip swings on a 203mm arc.">
+              <i class="bi bi-arrow-down"></i> Vertical
+            </button>
+            <div class="form-check form-switch mb-0" data-bs-toggle="tooltip"
+                 title="While on, every servo tick forces RX=180 / RY=0 so the tool stays pointed straight down. Puck roll/pitch inputs are ignored; yaw (RZ) still works. Use with Tool 1 for top-down picks — fingertip XY tracks the puck, tool stays perpendicular to the table.">
+              <input class="form-check-input" type="checkbox" id="chk-lock-vertical">
+              <label class="form-check-label small text-muted" for="chk-lock-vertical">Lock</label>
+            </div>
+          </div>
 
           <div class="mt-2">
             <label class="form-label form-label-sm mb-0">

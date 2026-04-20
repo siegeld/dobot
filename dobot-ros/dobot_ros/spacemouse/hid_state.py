@@ -28,6 +28,10 @@ DEFAULT_SETTINGS = {
     "idle_auto_disarm_s": 30.0,
     "button_debounce_ms": 150,
     "gripper_force": 20,
+    # First-order IIR smoothing applied to each axis value before it
+    # becomes a velocity command. smoothed[i] = alpha*raw + (1-alpha)*prev.
+    # 1.0 = no filtering (raw); 0.0 = frozen. 0.35 at 50Hz ≈ 45ms time const.
+    "axis_lpf_alpha": 0.35,
 }
 
 
@@ -47,6 +51,10 @@ class SpaceMouseSettings:
     idle_auto_disarm_s: float = 30.0
     button_debounce_ms: int = 150
     gripper_force: int = 20
+    # IIR smoothing on axis values to remove HID micro-jitter before the
+    # velocity command is emitted. 1.0 disables (raw); 0.35 at 50Hz is
+    # a good default.
+    axis_lpf_alpha: float = 0.35
 
     def __post_init__(self):
         if len(self.sign_map) != 6:
@@ -64,6 +72,8 @@ class SpaceMouseSettings:
             raise ValueError("idle_auto_disarm_s must be > 0")
         if not 0 <= self.gripper_force <= 100:
             raise ValueError("gripper_force must be in [0, 100]")
+        if not 0.0 < self.axis_lpf_alpha <= 1.0:
+            raise ValueError("axis_lpf_alpha must be in (0, 1]")
 
 
 @dataclass

@@ -18,6 +18,25 @@ HTTP / WebSocket reference.
   Settings; persistent sidebar with 3D robot view, robot control, gripper,
   and joint/cartesian position.
 - **3D robot visualization** with joint poses driven off the live state.
+- **Tool-frame selector** in the Robot Control card — dropdown switches
+  between Tool 0 (wrist / flange) and Tool 1 (fingertip, 203 mm AG-105
+  offset on the robot controller). The selected index is applied via the
+  `Tool` service, persisted to the settings store, re-applied on container
+  restart, and surfaced over `/api/status` for display. The ServoTester
+  floor guard recomputes its Z minimum using the active tool length so the
+  fingertip can't be driven into the table in either mode.
+- **"Vertical" button** — one-click orient the tool so its Z axis points
+  straight down at the floor (RX=180, RY=0, RZ preserved). In Tool 1 the
+  fingertip stays pinned on the table and the wrist swings around it; in
+  Tool 0 the wrist stays pinned and the fingertip swings on a 203 mm arc.
+  Ideal first step for a top-down pick workflow.
+- **"Lock vertical" toggle** — persistent mode that re-projects every
+  ServoP target pose to RX=180 / RY=0 right before the call, regardless of
+  puck input, Euler-integration drift, or TCS re-solves. Puck roll/pitch
+  inputs are zeroed on the velocity path so the commanded offset stays
+  consistent with the pose-level clamp; yaw (RZ) is left free. Pair with
+  Tool 1 for the pick workflow: fingertip XY/Z tracks the puck, gripper
+  stays perpendicular to the table.
 - **Sidebar card drag-and-drop reordering** — every sidebar card is
   draggable by its header; order persists to the settings store under
   `ui_sidebar.card_order`.
@@ -37,6 +56,11 @@ HTTP / WebSocket reference.
   servo tester via `set_target_velocity()`. Release the puck → zero
   velocity → robot stops on the very next tick. (Previous design
   integrated to a position target, which caused catch-up lag on release.)
+- **Axis LPF smoothing** — first-order IIR filter on raw HID axis values
+  before they become a velocity command, configurable via
+  `axis_lpf_alpha` (1.0 = raw, 0.35 ≈ 45 ms time constant at 50 Hz).
+  Removes HID micro-jitter that previously showed up as jerky motion at
+  low velocities.
 - Configurable deadband, per-axis sign map, max XYZ / RPY velocity, and
   max excursion. Idle auto-disarm after N seconds of no motion. Buttons
   bind to gripper open/close when armed.
@@ -50,6 +74,12 @@ HTTP / WebSocket reference.
   deg/s) enforced in the tick loop. XYZ is clamped as a 3-vector
   magnitude (direction preserved); RPY is clamped per axis. Applies to
   every input path — jog sliders, patterns, rate-control velocity, etc.
+- **Lock vertical mode** (`lock_vertical` config key) — force-projects
+  every ServoP target to RX=180, RY=0 before the call and zeroes RX/RY
+  velocity input so the accumulated offset stays consistent. Catches
+  drift from any source (puck noise, Euler integration, Tool(N)
+  re-solves near the vertical configuration) that would otherwise tip
+  the tool off perpendicular. RZ is left free.
 - Save / Reset buttons for tuning values; settings persist via the store
   and are pre-filled on page load.
 - Pattern generators (sine, circle, lissajous, square) with configurable

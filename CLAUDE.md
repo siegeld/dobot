@@ -75,7 +75,15 @@ The C++ driver connects to the robot on two ports: 29999 (commands) and 30004 (r
 
 DH Robotics **AG-105** (not AG-95 as originally assumed). 105mm stroke, same Modbus register map as AG-95. Flange-to-gripper-tip distance: **203mm (8 inches)**.
 
-**Tool offset**: Setting `SetTool(1, {0,0,203,0,0,0})` + `Tool(1)` on the Dobot triggers workspace protection errors (error 1479) because the TCP Z drops below the robot's floor protection limit. The workspace protection limits need to be adjusted in Dobot Studio before the tool offset can be used. Until then, the gripper length must be accounted for in software (table calibration records wrist Z when gripper tip touches the table, so the offset is implicit).
+**Tool offset**: `Tool(1)` is pre-configured on the robot controller as `{0, 0, 203, 0, 0, 0}` (tool-Z offset, no rotation). The web dashboard's Tool-frame dropdown switches between:
+- **Tool 0** (wrist / flange) — cartesian pose is the wrist
+- **Tool 1** (fingertip) — cartesian pose is the fingertip. Servo rotations pivot around the fingertip and the floor guard re-computes its Z minimum using the 203 mm tool length.
+
+Tool selection is applied via the `Tool` ROS service, persisted to the settings store, and re-applied on container restart. There is no `GetTool` service — the controller-side definition can't be read back, so tool length is a configured value in the settings store (default 203 mm).
+
+**Picking mode** — intended combo for top-down picks via SpaceMouse: select Tool 1, click **Vertical** in Robot Control (orients RX=180, RY=0, preserves RZ), then flip **Lock** on. The servo tester then force-projects every ServoP target to RX=180 / RY=0 and zeros puck RX/RY velocity, so the gripper stays perpendicular to the table as the fingertip XY/Z tracks the puck. Yaw (RZ) is left free for jaw alignment.
+
+**Historical workspace-protection note**: early attempts at setting `SetTool(1, {0,0,203,0,0,0})` triggered error 1479 because the TCP Z dropped below the controller's floor protection limit. Once the workspace protection limits were loosened in Dobot Studio, `Tool(1)` works and is now the canonical fingertip frame.
 
 ## Calibration
 

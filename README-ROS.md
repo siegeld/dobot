@@ -73,6 +73,36 @@ This starts both the ROS2 driver and the web dashboard in Docker. Both services 
 ./startup.sh --stop     # Stop everything
 ```
 
+### Web Dashboard Highlights
+
+The dashboard at `http://localhost:7070` is the main interface. A few
+features worth knowing about upfront — the full list lives in
+[CHANGELOG.md](CHANGELOG.md):
+
+- **Tabs** for Dashboard, Calibration, Vision, VLA, Servo, Settings;
+  persistent sidebar with a 3D robot view, robot control, gripper, and
+  joint/cartesian position.
+- **Tool-frame selector** in the Robot Control card — switch between
+  Tool 0 (wrist / flange) and Tool 1 (fingertip, 203 mm AG-105 offset).
+  The ServoTester floor guard recomputes its Z minimum for the active
+  tool so the fingertip can't drive into the table in either mode.
+- **"Vertical"** button — one-click orient the tool so its Z axis points
+  straight down (RX=180, RY=0, RZ preserved).
+- **"Lock"** toggle — keeps the tool perpendicular during SpaceMouse
+  jogging by re-projecting every ServoP target to RX=180 / RY=0. Pair
+  with Tool 1 for the pick workflow: fingertip XY/Z tracks the puck,
+  gripper stays perpendicular to the table, yaw (RZ) stays free.
+- **SpaceMouse pendant** at `/spacemouse` — rate-controlled jogging
+  (release = stop), IIR-smoothed axes, configurable deadband / sign map
+  / velocity caps, button-to-gripper bindings, idle auto-disarm.
+- **Servo tester** at the Servo tab — ServoP streaming bench with live
+  tuning, hard velocity caps, pattern generators, CSV logging.
+- **Calibration & Vision** tabs — table-plane recording, camera→robot
+  transform, vision-guided picking with pluggable strategies.
+- **VLA** tab — recorder + executor for OpenVLA-OFT closed-loop
+  inference over the ServoTester streaming path.
+- **Settings** tab — save/load named snapshots of all persistent state.
+
 ### Use the CLI
 
 In another terminal:

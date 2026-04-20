@@ -55,6 +55,13 @@ class ServoConfig:
     # giving up and parking. None = forever (stay in servo mode until stop()).
     idle_timeout_s: Optional[float] = None
 
+    # When true, every commanded pose is force-projected to RX=180, RY=0 before
+    # ServoP is called, and any RX/RY velocity/target input is zeroed before
+    # integration. Keeps the tool Z axis pointed straight down regardless of
+    # puck rotation noise, Euler integration drift, or Tool(N) TCS re-solves.
+    # RZ (yaw) is left free. Intended for top-down pick workflows.
+    lock_vertical: bool = False
+
 
 @dataclass
 class ServoStatus:
@@ -235,6 +242,7 @@ class ServoTester:
         "aheadtime": float, "gain": float,
         "max_velocity_xyz": float, "max_velocity_rpy": float,
         "idle_timeout_s": (float, type(None)),
+        "lock_vertical": bool,
     }
 
     def update_config(self, **kwargs) -> ServoStatus:
@@ -247,6 +255,11 @@ class ServoTester:
                 try:
                     if expected is float:
                         v = float(v)
+                    elif expected is bool:
+                        if isinstance(v, str):
+                            v = v.strip().lower() in ("1", "true", "yes", "on")
+                        else:
+                            v = bool(v)
                     elif isinstance(expected, tuple) and type(None) in expected:
                         v = float(v) if v is not None else None
                 except (TypeError, ValueError):
@@ -292,6 +305,7 @@ class ServoTester:
                 #     position at a safe rate.
                 with self._lock:
                     vcmd = self._target_velocity
+                    lock_vert = bool(self.config.lock_vertical)
                 if vcmd is not None:
                     vx, vy, vz = vcmd[0], vcmd[1], vcmd[2]
                     vmag = math.sqrt(vx * vx + vy * vy + vz * vz)
@@ -304,6 +318,12 @@ class ServoTester:
                     self._commanded_offset[2] += vz * dt
                     cap_rpy = max(0.0, self.config.max_velocity_rpy)
                     for i in range(3, 6):
+                        # Lock vertical zeroes RX/RY velocity so the accumulated
+                        # offset stays in sync with the pose-level clamp below.
+                        # Without this, turning the lock off later would snap
+                        # the wrist to the accumulated tilt.
+                        if lock_vert and i in (3, 4):
+                            continue
                         vi = vcmd[i]
                         if vi > cap_rpy:
                             vi = cap_rpy
@@ -329,6 +349,8 @@ class ServoTester:
                     self._commanded_offset[1] += dy
                     self._commanded_offset[2] += dz
                     for i in range(3, 6):
+                        if lock_vert and i in (3, 4):
+                            continue
                         d = target[i] - self._commanded_offset[i]
                         if d > max_rpy_step:
                             d = max_rpy_step
@@ -338,6 +360,14 @@ class ServoTester:
 
                 offset = list(self._commanded_offset)
                 commanded = [self._anchor[i] + offset[i] for i in range(6)]
+
+                # Lock vertical: force the final commanded pose's RX/RY to
+                # (180, 0) so the tool Z axis always points straight down,
+                # regardless of what the anchor + offset would otherwise
+                # resolve to. RZ (yaw around tool Z) is left untouched.
+                if lock_vert:
+                    commanded[3] = 180.0
+                    commanded[4] = 0.0
 
                 # Safety: clamp against workspace bounds.
                 # We DON'T clamp per-step delta here because the tester
