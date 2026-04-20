@@ -2209,6 +2209,17 @@ def _get_spacemouse_reader():
             # Pass the factory (not an instance) so the servo tester is only
             # materialized when the operator actually arms — lets /state and
             # the test page work even if servo tester construction would fail.
+            # Callback: release the server's motion lock on any reader-
+            # initiated disarm (idle timeout, device lost, reader-side
+            # emergency_stop). Without this, a self-triggered disarm leaves
+            # _motion_active="spacemouse" stuck, and subsequent arms fail
+            # with "spacemouse is currently active — stop it first".
+            def _spacemouse_release_motion():
+                with _motion_lock:
+                    global _motion_active
+                    if _motion_active == "spacemouse":
+                        _motion_active = None
+
             _spacemouse_reader = SpaceMouseReader(
                 servo_tester=_get_servo_tester,
                 ros_client=_get_client(),
@@ -2217,6 +2228,7 @@ def _get_spacemouse_reader():
                 find_device_fn=find_device,
                 open_device_fn=open_device,
                 battery_fn=read_battery_pct,
+                on_disarm=_spacemouse_release_motion,
             )
             _spacemouse_reader.start_threads(tick_hz=50.0)
 

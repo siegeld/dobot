@@ -22,6 +22,16 @@
     .nav-tabs .nav-link { padding: 0.35rem 0.85rem; font-size: 0.9rem; }
     #robot-3d-container { min-height: 280px; }
     .estop-btn { font-weight: 600; }
+    /* Sidebar drag-and-drop reordering. Each .sidebar-card is draggable;
+       the grip icon in the header signals that. Drop target shows a
+       blue bar above the card so you can see where it'll land. */
+    .sidebar-card .card-header { cursor: grab; user-select: none; }
+    .sidebar-card .card-header:active { cursor: grabbing; }
+    .sidebar-card .drag-handle { opacity: 0.4; }
+    .sidebar-card .card-header:hover .drag-handle { opacity: 0.8; }
+    .sidebar-card.dragging { opacity: 0.4; }
+    .sidebar-card.drop-above { box-shadow: 0 -3px 0 0 #0d6efd; }
+    .sidebar-card.drop-below { box-shadow: 0 3px 0 0 #0d6efd; }
   </style>
 </head>
 <body>
@@ -59,9 +69,9 @@
     <aside class="col-lg-4 app-sidebar">
 
       <!-- 3D Robot View -->
-      <div class="card mb-2">
+      <div class="card mb-2 sidebar-card" data-card-id="view" draggable="true">
         <div class="card-header d-flex justify-content-between align-items-center">
-          <span><i class="bi bi-badge-3d"></i> Robot View</span>
+          <span><i class="bi bi-grip-vertical drag-handle"></i> <i class="bi bi-badge-3d"></i> Robot View</span>
           <div class="btn-group btn-group-sm">
             <button class="btn btn-outline-secondary btn-xs" id="btn-save-camera" title="Save camera view">
               <i class="bi bi-bookmark"></i> Save
@@ -77,9 +87,9 @@
       </div>
 
       <!-- Robot Control -->
-      <div class="card mb-2">
+      <div class="card mb-2 sidebar-card" data-card-id="control" draggable="true">
         <div class="card-header">
-          <i class="bi bi-power"></i> Robot Control
+          <i class="bi bi-grip-vertical drag-handle"></i> <i class="bi bi-power"></i> Robot Control
         </div>
         <div class="card-body py-2">
           <div class="d-flex gap-2 mb-2">
@@ -110,9 +120,9 @@
       </div>
 
       <!-- Gripper Control -->
-      <div class="card mb-2">
+      <div class="card mb-2 sidebar-card" data-card-id="gripper" draggable="true">
         <div class="card-header d-flex justify-content-between align-items-center">
-          <span><i class="bi bi-hand-index-thumb"></i> Gripper</span>
+          <span><i class="bi bi-grip-vertical drag-handle"></i> <i class="bi bi-hand-index-thumb"></i> Gripper</span>
           <span id="gripper-status-badge" class="badge bg-secondary">Not Init</span>
         </div>
         <div class="card-body py-2">
@@ -168,9 +178,9 @@
       </div>
 
       <!-- Position Display -->
-      <div class="card mb-2">
+      <div class="card mb-2 sidebar-card" data-card-id="position" draggable="true">
         <div class="card-header d-flex justify-content-between align-items-center">
-          <span><i class="bi bi-crosshair"></i> Robot Position</span>
+          <span><i class="bi bi-grip-vertical drag-handle"></i> <i class="bi bi-crosshair"></i> Robot Position</span>
           <span class="badge bg-info" id="update-rate">-- Hz</span>
         </div>
         <div class="card-body py-2">
@@ -1125,6 +1135,14 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="/static/js/app.js"></script>
+<!-- Extracted feature modules — must load AFTER app.js so window.DobotUI is populated. -->
+<script src="/static/js/app-vla.js"></script>
+<script src="/static/js/app-servo.js"></script>
+<script src="/static/js/app-settings.js"></script>
+<script src="/static/js/app-calibration.js"></script>
+<script src="/static/js/app-vision.js"></script>
+<script src="/static/js/app-sidebar.js"></script>
+<script src="/static/js/app-misc.js"></script>
 <script type="module" src="/static/js/robot3d.js"></script>
 
 </body>

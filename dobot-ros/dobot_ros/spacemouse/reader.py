@@ -47,6 +47,7 @@ class SpaceMouseReader:
         find_device_fn: Callable[[], Optional[str]],
         open_device_fn: Callable[[str], object],
         battery_fn: Callable[[], Optional[int]],
+        on_disarm: Optional[Callable[[], None]] = None,
     ):
         # Factory vs. direct instance: heuristic is "has set_target_offset".
         if hasattr(servo_tester, "set_target_offset"):
@@ -61,6 +62,10 @@ class SpaceMouseReader:
         self._find_device = find_device_fn
         self._open_device = open_device_fn
         self._read_battery = battery_fn
+        # Optional hook invoked after any disarm path (explicit, idle-timeout,
+        # E-stop, device lost). Used by the web server to release its motion
+        # lock so arm() can succeed again after a self-triggered disarm.
+        self._on_disarm = on_disarm
 
         self._lock = threading.RLock()
         self._state = HidState()
@@ -134,6 +139,7 @@ class SpaceMouseReader:
             self._state.armed = False
             self._state.offset = [0.0] * 6
             log.info("SpaceMouse disarmed")
+        self._fire_on_disarm()
 
     def emergency_stop(self):
         """E-stop: halt the servo stream AND call ros.stop()."""
@@ -149,6 +155,18 @@ class SpaceMouseReader:
             self._state.offset = [0.0] * 6
             self._state.error = "emergency stop"
             log.warning("SpaceMouse E-stop")
+        self._fire_on_disarm()
+
+    def _fire_on_disarm(self):
+        """Run the on_disarm hook outside the reader lock so it can't deadlock
+        with the server's motion-lock acquisition."""
+        cb = self._on_disarm
+        if cb is None:
+            return
+        try:
+            cb()
+        except Exception as e:
+            log.warning("on_disarm callback failed: %s", e)
 
     # ── Event ingestion (driven by evdev thread OR by tests) ────────
     def set_axis_absmax(self, absmax_per_axis: List[int]):
@@ -283,6 +301,7 @@ class SpaceMouseReader:
                 self._servo.emergency_stop()
             except Exception as e:
                 log.warning("emergency_stop on device loss failed: %s", e)
+            self._fire_on_disarm()
         log.warning("SpaceMouse device lost: %s", reason)
 
     # ── Threads ─────────────────────────────────────────────────────
