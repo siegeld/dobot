@@ -931,6 +931,15 @@
                     <label class="small">aheadtime (D): <span id="srv-ahead-val">50</span></label>
                     <input type="range" class="form-range" id="srv-ahead" min="20" max="100" step="1" value="50">
                   </div>
+                  <hr class="my-2">
+                  <div class="mb-2" data-bs-toggle="tooltip" data-bs-html="true" title="<b>Max XYZ velocity</b> — hard cap on translational speed. Applied in the tick loop as a 3-vector magnitude: direction is preserved when clamped.<br>Works across all inputs (jog slider snap-back, pattern jumps, misbehaving clients). Safety-critical: lower this if motions feel too aggressive. Default 100 mm/s.">
+                    <label class="small text-warning"><i class="bi bi-shield-check"></i> Max XYZ velocity (mm/s): <span id="srv-maxv-xyz-val">100</span></label>
+                    <input type="range" class="form-range" id="srv-maxv-xyz" min="1" max="300" step="1" value="100">
+                  </div>
+                  <div class="mb-2" data-bs-toggle="tooltip" data-bs-html="true" title="<b>Max RPY velocity</b> — hard cap on rotational speed per axis (RX / RY / RZ clamped independently).<br>Default 45 °/s.">
+                    <label class="small text-warning"><i class="bi bi-shield-check"></i> Max RPY velocity (°/s): <span id="srv-maxv-rpy-val">45</span></label>
+                    <input type="range" class="form-range" id="srv-maxv-rpy" min="1" max="180" step="1" value="45">
+                  </div>
                   <div class="form-check form-check-sm mt-2" data-bs-toggle="tooltip" data-bs-html="true" title="<b>CSV logging</b> — records (t, offset, commanded pose, actual pose, servo-call latency) every tick to <code>/data/servo-logs/servo_&lt;timestamp&gt;.csv</code>. Use for offline plotting of step response / frequency tracking.">
                     <input type="checkbox" class="form-check-input" id="srv-csv">
                     <label class="form-check-label small" for="srv-csv">Log CSV to <code>/data/servo-logs/</code></label>

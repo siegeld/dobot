@@ -79,6 +79,8 @@
       ['srv-t', 'srv-t-val', v => v],
       ['srv-gain', 'srv-gain-val', v => v],
       ['srv-ahead', 'srv-ahead-val', v => v],
+      ['srv-maxv-xyz', 'srv-maxv-xyz-val', v => v],
+      ['srv-maxv-rpy', 'srv-maxv-rpy-val', v => v],
     ];
     for (const [sliderId, valId, fmt] of tuneMap) {
       const el = byId(sliderId);
@@ -92,10 +94,12 @@
     // and their value labels. Used on load and Reset.
     const applyTuning = (cfg) => {
       const fields = [
-        ['srv-rate',  'srv-rate-val',  cfg.servo_rate_hz],
-        ['srv-t',     'srv-t-val',     cfg.t],
-        ['srv-gain',  'srv-gain-val',  cfg.gain],
-        ['srv-ahead', 'srv-ahead-val', cfg.aheadtime],
+        ['srv-rate',     'srv-rate-val',     cfg.servo_rate_hz],
+        ['srv-t',        'srv-t-val',        cfg.t],
+        ['srv-gain',     'srv-gain-val',     cfg.gain],
+        ['srv-ahead',    'srv-ahead-val',    cfg.aheadtime],
+        ['srv-maxv-xyz', 'srv-maxv-xyz-val', cfg.max_velocity_xyz],
+        ['srv-maxv-rpy', 'srv-maxv-rpy-val', cfg.max_velocity_rpy],
       ];
       for (const [sid, vid, val] of fields) {
         if (val === undefined || val === null) continue;
@@ -129,6 +133,8 @@
         t: parseFloat(byId('srv-t').value),
         gain: parseFloat(byId('srv-gain').value),
         aheadtime: parseFloat(byId('srv-ahead').value),
+        max_velocity_xyz: parseFloat(byId('srv-maxv-xyz').value),
+        max_velocity_rpy: parseFloat(byId('srv-maxv-rpy').value),
       };
       try {
         const res = await servoPost('/api/servo/config', cfg);
