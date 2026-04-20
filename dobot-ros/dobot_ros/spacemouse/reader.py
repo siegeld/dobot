@@ -234,8 +234,13 @@ class SpaceMouseReader:
 
     # ── Tick loop ───────────────────────────────────────────────────
     def tick_once(self, dt: float):
-        """One iteration of the 50 Hz integration loop. Tests drive this directly;
-        in production the threaded wrapper calls it every `dt` seconds."""
+        """One iteration of the 50 Hz loop. Emits a velocity command
+        (not a position target) to the servo tester, which integrates
+        it directly. Release the puck → v=0 → robot stops that tick.
+
+        Tests drive this directly; in production the threaded wrapper
+        calls it every `dt` seconds.
+        """
         with self._lock:
             s = self._settings
             v = [0.0] * 6
@@ -247,25 +252,27 @@ class SpaceMouseReader:
                     v[i] = a * scale * s.sign_map[i]
                     any_active = True
 
-            new_offset = list(self._offset)
-            for i in range(6):
-                new_offset[i] += v[i] * dt
-
+            # Excursion guard: commanded offset is tracked from the tester's
+            # read-back each tick (_offset). Predict next commanded position
+            # as offset + v·dt — if that would exceed ±max_excursion, clip
+            # v exactly so we land at the limit rather than overshooting by
+            # one tick. dt here is the reader's tick dt; if the tester runs
+            # at a different rate the one-tick residual is bounded.
+            current_offset = list(self._offset)
             mx = s.max_excursion_xyz
             mr = s.max_excursion_rpy
             for i in range(3):
-                if new_offset[i] > mx:
-                    new_offset[i] = mx
-                elif new_offset[i] < -mx:
-                    new_offset[i] = -mx
+                predicted = current_offset[i] + v[i] * dt
+                if predicted > mx and v[i] > 0:
+                    v[i] = max(0.0, (mx - current_offset[i]) / dt) if dt > 0 else 0.0
+                elif predicted < -mx and v[i] < 0:
+                    v[i] = min(0.0, (-mx - current_offset[i]) / dt) if dt > 0 else 0.0
             for i in range(3, 6):
-                if new_offset[i] > mr:
-                    new_offset[i] = mr
-                elif new_offset[i] < -mr:
-                    new_offset[i] = -mr
-
-            self._offset = new_offset
-            self._state.offset = list(new_offset)
+                predicted = current_offset[i] + v[i] * dt
+                if predicted > mr and v[i] > 0:
+                    v[i] = max(0.0, (mr - current_offset[i]) / dt) if dt > 0 else 0.0
+                elif predicted < -mr and v[i] < 0:
+                    v[i] = min(0.0, (-mr - current_offset[i]) / dt) if dt > 0 else 0.0
 
             now = self._time()
             if any_active:
@@ -275,13 +282,25 @@ class SpaceMouseReader:
 
             armed = self._armed
             idle_timeout = self._settings.idle_auto_disarm_s
-            offset_snapshot = list(self._offset)
+            velocity_cmd = list(v)
 
         if armed:
             try:
-                self._servo.set_target_offset(offset_snapshot)
+                self._servo.set_target_velocity(velocity_cmd)
+                # Read back the tester's commanded offset as our display
+                # value. Wrapped in try/except since the mock or status()
+                # may not always return a 6-vector.
+                try:
+                    status = self._servo.status()
+                    actual = list(getattr(status, "last_target_offset", []) or [])
+                    if len(actual) == 6:
+                        with self._lock:
+                            self._offset = actual
+                            self._state.offset = list(actual)
+                except Exception:
+                    pass
             except Exception as e:
-                log.warning("servo.set_target_offset failed: %s", e)
+                log.warning("servo.set_target_velocity failed: %s", e)
 
             if idle_s >= idle_timeout:
                 log.info("SpaceMouse idle %.1fs → auto-disarm", idle_s)

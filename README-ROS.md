@@ -2,7 +2,16 @@
 
 This is the ROS2-based version of the Dobot CR CLI. Instead of communicating directly with the robot via TCP/IP, it uses ROS2 services provided by the `DOBOT_6Axis_ROS2_V4` driver.
 
+> **Related docs**
+> - [ARCHITECTURE.md](ARCHITECTURE.md) — system diagram, containers, control flow, safety boundaries, file map.
+> - [API.md](API.md) — HTTP + WebSocket reference for the web dashboard.
+> - [CHANGELOG.md](CHANGELOG.md) — user-facing change history.
+> - [VLA.md](VLA.md) — Vision-Language-Action stack design.
+> - [VISION.md](VISION.md) — camera → robot geometry and pick strategies.
+
 ## Architecture
+
+Short version: a Docker compose stack runs three services (`dobot-driver`, `dobot-gripper`, `dobot-web`) on host networking. The driver container hosts the vendor C++ ROS node, which maintains TCP sessions to the robot (29999 command, 30004 feedback). The web container runs the FastAPI dashboard, a ServoP streaming tester, the SpaceMouse pendant reader, and the VLA executor — all talking to the driver via ROS 2 services + topics. The gripper node owns the single Modbus TCP connection through the robot's internal RS-485 gateway (port 60000).
 
 ```
 ┌─────────────────┐     ROS2 Services      ┌──────────────────────┐     TCP/IP     ┌─────────┐
@@ -10,6 +19,8 @@ This is the ROS2-based version of the Dobot CR CLI. Instead of communicating dir
 │  (Python)       │   /dobot_bringup_ros2/  │  (C++ driver)        │   Port 29999   │         │
 └─────────────────┘          srv/*          └──────────────────────┘                └─────────┘
 ```
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full diagram including nginx, the gripper node, watchdog signaling, and the ServoTester's two input modes.
 
 **Benefits of ROS2 approach:**
 - Integration with ROS2 ecosystem (MoveIt, RViz, Gazebo)

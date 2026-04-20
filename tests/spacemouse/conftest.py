@@ -154,6 +154,13 @@ class MockServoTester:
         self.stop_calls = 0
         self.emergency_stop_calls = 0
         self.target_offsets: list = []
+        # Rate-control API (set_target_velocity). Tests inspect these
+        # lists to verify the reader emits velocity rather than position.
+        self.target_velocities: list = []
+        # Optional commanded-offset override; reader reads this back via
+        # status().last_target_offset. Tests can set it to simulate the
+        # tester lagging behind the commanded velocity.
+        self._commanded_offset = [0.0] * 6
 
     def is_running(self) -> bool:
         return self._running
@@ -177,10 +184,31 @@ class MockServoTester:
 
     def set_target_offset(self, offset):
         self.target_offsets.append(list(offset))
+        self._commanded_offset = list(offset)
+        obj = type("S", (), {})()
+        obj.last_target_offset = list(self._commanded_offset)
+        obj.anchor_pose = list(self._anchor)
+        return obj
 
-        class _Status:
-            pass
-        return _Status()
+    def set_target_velocity(self, velocity):
+        """Rate-control API — mirrors the real tester. Integrates the
+        velocity into ``_commanded_offset`` using a nominal 50 Hz dt so
+        tests that want to inspect read-back behaviour get a sensible
+        value. Tests that don't care can ignore ``_commanded_offset``."""
+        self.target_velocities.append(list(velocity))
+        dt = 1.0 / 50.0
+        for i in range(6):
+            self._commanded_offset[i] += velocity[i] * dt
+        obj = type("S", (), {})()
+        obj.last_target_offset = list(self._commanded_offset)
+        obj.anchor_pose = list(self._anchor)
+        return obj
+
+    def status(self):
+        obj = type("S", (), {})()
+        obj.last_target_offset = list(self._commanded_offset)
+        obj.anchor_pose = list(self._anchor)
+        return obj
 
     @property
     def anchor(self):

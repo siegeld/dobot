@@ -6,6 +6,16 @@
 
 A professional, production-ready CLI tool for controlling Dobot CR series collaborative robots (CR3, CR5, CR5A, CR7, CR10, CR16, etc.) via Python.
 
+> **Two integration paths live in this repo.** This README covers the
+> **direct TCP/IP** path (`dobot_cr/`, native Python). For the ROS 2 /
+> Docker stack — web dashboard, SpaceMouse pendant, ServoTester, VLA,
+> vision-guided picking — see **[README-ROS.md](README-ROS.md)** and the
+> design docs:
+> - [ARCHITECTURE.md](ARCHITECTURE.md) — system diagram, containers, control flow
+> - [API.md](API.md) — HTTP + WebSocket reference for the web dashboard
+> - [CHANGELOG.md](CHANGELOG.md) — user-facing change history
+> - [VLA.md](VLA.md) / [VISION.md](VISION.md) — ML and vision stack
+
 ## Features
 
 ✨ **Dual Mode Operation** - Interactive shell OR one-shot commands

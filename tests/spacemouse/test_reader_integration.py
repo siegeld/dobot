@@ -33,44 +33,62 @@ def test_tick_does_nothing_when_disarmed(mock_servo, mock_ros):
     r.on_raw_axis(0, 350)
     advance(0.02)
     r.tick_once(dt=0.02)
+    # Reader is rate-control now: nothing should go to the tester when
+    # disarmed — neither set_target_velocity nor set_target_offset.
+    assert mock_servo.target_velocities == []
     assert mock_servo.target_offsets == []
 
 
-def test_tick_integrates_offset_when_armed(mock_servo, mock_ros):
+def test_tick_emits_velocity_when_armed(mock_servo, mock_ros):
+    """Full axis push → one velocity command per tick at max_velocity_xyz."""
     r, advance = _reader_with_clock(mock_servo, mock_ros, max_velocity_xyz=80.0)
     r.arm()
     r.on_raw_axis(0, 350)
     advance(0.02)
     r.tick_once(dt=0.02)
-    assert len(mock_servo.target_offsets) == 1
-    off = mock_servo.target_offsets[-1]
-    assert abs(off[0] - 80.0 * 0.02) < 1e-6
-    assert off[1:] == [0.0, 0.0, 0.0, 0.0, 0.0]
+    assert len(mock_servo.target_velocities) == 1
+    vel = mock_servo.target_velocities[-1]
+    assert abs(vel[0] - 80.0) < 1e-6
+    assert vel[1:] == [0.0, 0.0, 0.0, 0.0, 0.0]
 
 
-def test_tick_accumulates_offset_over_multiple_ticks(mock_servo, mock_ros):
+def test_release_stops_motion_immediately(mock_servo, mock_ros):
+    """Axis returns to zero → the very next tick emits zero velocity.
+
+    This is the whole point of rate control: release = stop. No residual
+    motion, no catch-up lag.
+    """
     r, advance = _reader_with_clock(mock_servo, mock_ros, max_velocity_xyz=80.0)
     r.arm()
+    # Push for 5 ticks.
     r.on_raw_axis(0, 350)
-    for _ in range(10):
+    for _ in range(5):
         advance(0.02)
         r.tick_once(dt=0.02)
-    off = mock_servo.target_offsets[-1]
-    assert abs(off[0] - 16.0) < 1e-3
+    # Release.
+    r.on_raw_axis(0, 0)
+    advance(0.02)
+    r.tick_once(dt=0.02)
+    # Very next emitted velocity must be zero on every axis.
+    assert mock_servo.target_velocities[-1] == [0.0] * 6
 
 
 def test_tick_respects_deadband(mock_servo, mock_ros):
     r, advance = _reader_with_clock(mock_servo, mock_ros, deadband=0.1)
     r.arm()
-    r.on_raw_axis(0, int(0.05 * 350))
+    r.on_raw_axis(0, int(0.05 * 350))  # inside deadband (5% of full scale)
     for _ in range(10):
         advance(0.02)
         r.tick_once(dt=0.02)
-    off = mock_servo.target_offsets[-1]
-    assert off == [0.0] * 6
+    # Every emitted velocity should be all zeros.
+    for vel in mock_servo.target_velocities:
+        assert vel == [0.0] * 6
 
 
-def test_tick_clamps_offset_to_max_excursion(mock_servo, mock_ros):
+def test_excursion_limit_zeros_outward_velocity(mock_servo, mock_ros):
+    """Once the mock's commanded offset hits max_excursion_xyz in +X,
+    the reader must stop pushing +X (v[0] = 0). Pulling back is still
+    allowed (v[0] < 0 would pass through)."""
     r, advance = _reader_with_clock(
         mock_servo, mock_ros, max_velocity_xyz=1000.0, max_excursion_xyz=50.0)
     r.arm()
@@ -78,11 +96,15 @@ def test_tick_clamps_offset_to_max_excursion(mock_servo, mock_ros):
     for _ in range(20):
         advance(0.02)
         r.tick_once(dt=0.02)
-    off = mock_servo.target_offsets[-1]
-    assert off[0] == pytest.approx(50.0)
+    # The mock integrates velocity × dt; commanded offset should be clamped
+    # by the reader's excursion guard once it reaches 50 mm.
+    assert mock_servo._commanded_offset[0] <= 50.0 + 1e-3
+    # And the LAST few emitted velocities (when already at excursion) are
+    # zero on X because the reader zeros outward velocity there.
+    assert mock_servo.target_velocities[-1][0] == 0.0
 
 
-def test_tick_clamps_negative_excursion(mock_servo, mock_ros):
+def test_excursion_limit_negative_direction(mock_servo, mock_ros):
     r, advance = _reader_with_clock(
         mock_servo, mock_ros, max_velocity_xyz=1000.0, max_excursion_xyz=50.0)
     r.arm()
@@ -90,8 +112,8 @@ def test_tick_clamps_negative_excursion(mock_servo, mock_ros):
     for _ in range(20):
         advance(0.02)
         r.tick_once(dt=0.02)
-    off = mock_servo.target_offsets[-1]
-    assert off[0] == pytest.approx(-50.0)
+    assert mock_servo._commanded_offset[0] >= -50.0 - 1e-3
+    assert mock_servo.target_velocities[-1][0] == 0.0
 
 
 def test_idle_auto_disarm_fires_after_timeout(mock_servo, mock_ros):

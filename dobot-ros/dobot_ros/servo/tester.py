@@ -114,6 +114,13 @@ class ServoTester:
         # lags until the cap has had time to carry us to the new target.
         self._commanded_offset: List[float] = [0.0] * 6
         self._last_tick_time: float = 0.0
+        # Rate-control input (SpaceMouse). When non-None, the tick loop
+        # integrates this velocity directly into _commanded_offset and
+        # ignores _target_offset / _pattern. Zero velocity on any tick
+        # means the robot stops that tick — no residual "catch up" motion.
+        # Set via set_target_velocity(); cleared when set_target_offset()
+        # or set_pattern() is called (those are position-mode inputs).
+        self._target_velocity: Optional[List[float]] = None
 
         self._latencies: Deque[float] = collections.deque(maxlen=200)
         self._status = ServoStatus()
@@ -134,6 +141,7 @@ class ServoTester:
             self._pattern = None
             self._commanded_offset = [0.0] * 6
             self._last_tick_time = 0.0
+            self._target_velocity = None
             self._stop.clear()
             self._status = ServoStatus(running=True, anchor_pose=list(self._anchor))
             if self.log_csv_path:
@@ -166,23 +174,50 @@ class ServoTester:
 
     # ── Live inputs ─────────────────────────────────────────────
     def set_target_offset(self, offset: List[float]) -> ServoStatus:
-        """Jog-slider update. Clears any active pattern."""
+        """Jog-slider update (position mode). Clears pattern and velocity cmd."""
         if len(offset) != 6:
             raise ValueError("target offset must be 6-D")
         with self._lock:
             self._target_offset = [float(v) for v in offset]
             self._pattern = None
+            self._target_velocity = None
             self._target_last_updated = time.time()
             self._status.mode = "jog"
             self._status.pattern_name = None
         return self.status()
 
+    def set_target_velocity(self, velocity: List[float]) -> ServoStatus:
+        """Rate-control update (SpaceMouse).
+
+        The tick loop integrates ``velocity`` into ``_commanded_offset`` each
+        tick. A zero velocity means no motion that tick — release = stop.
+        The velocity itself is capped by ``max_velocity_xyz`` (as 3-vector
+        magnitude) and ``max_velocity_rpy`` (per-axis) before integration.
+
+        Clears any active pattern and position target so the rate-control
+        path is not fighting a catch-up to a stale target_offset.
+        """
+        if len(velocity) != 6:
+            raise ValueError("target velocity must be 6-D")
+        with self._lock:
+            self._target_velocity = [float(v) for v in velocity]
+            self._pattern = None
+            # Freeze the position target at wherever we've actually
+            # commanded, so if the caller later flips back to position
+            # mode, there's no surprise jump.
+            self._target_offset = list(self._commanded_offset)
+            self._target_last_updated = time.time()
+            self._status.mode = "velocity"
+            self._status.pattern_name = None
+        return self.status()
+
     def set_pattern(self, pattern: Pattern, name: str) -> ServoStatus:
-        """Start driving the target from a pattern generator (overrides jog)."""
+        """Start driving the target from a pattern generator (position mode)."""
         with self._lock:
             self._pattern = pattern
             self._pattern_start_t = time.time()
             self._target_offset = [0.0] * 6
+            self._target_velocity = None
             self._target_last_updated = time.time()
             self._status.mode = "pattern"
             self._status.pattern_name = name
@@ -243,33 +278,63 @@ class ServoTester:
                     dt = period
                 self._last_tick_time = tick_start
 
-                # Pull the desired target (jog offset or pattern output).
-                target = self._current_offset()
-
-                # Rate-limit: advance _commanded_offset toward target at
-                # most max_velocity_{xyz,rpy} × dt per tick. XYZ as vector
-                # magnitude so direction is preserved; RPY independently.
                 max_xyz_step = max(0.0, self.config.max_velocity_xyz) * dt
                 max_rpy_step = max(0.0, self.config.max_velocity_rpy) * dt
-                dx = target[0] - self._commanded_offset[0]
-                dy = target[1] - self._commanded_offset[1]
-                dz = target[2] - self._commanded_offset[2]
-                mag = math.sqrt(dx * dx + dy * dy + dz * dz)
-                if mag > max_xyz_step and mag > 0.0:
-                    scale = max_xyz_step / mag
-                    dx *= scale
-                    dy *= scale
-                    dz *= scale
-                self._commanded_offset[0] += dx
-                self._commanded_offset[1] += dy
-                self._commanded_offset[2] += dz
-                for i in range(3, 6):
-                    d = target[i] - self._commanded_offset[i]
-                    if d > max_rpy_step:
-                        d = max_rpy_step
-                    elif d < -max_rpy_step:
-                        d = -max_rpy_step
-                    self._commanded_offset[i] += d
+
+                # Two input modes:
+                #   VELOCITY mode (set_target_velocity) — integrate the
+                #     commanded velocity directly into _commanded_offset,
+                #     capping the velocity itself. A zero velocity means
+                #     no motion this tick: release = stop.
+                #   POSITION mode (set_target_offset / patterns) — advance
+                #     _commanded_offset toward _target_offset at the same
+                #     velocity cap so the robot traverses to the target
+                #     position at a safe rate.
+                with self._lock:
+                    vcmd = self._target_velocity
+                if vcmd is not None:
+                    vx, vy, vz = vcmd[0], vcmd[1], vcmd[2]
+                    vmag = math.sqrt(vx * vx + vy * vy + vz * vz)
+                    cap_xyz = max(0.0, self.config.max_velocity_xyz)
+                    if vmag > cap_xyz and vmag > 0.0:
+                        s = cap_xyz / vmag
+                        vx, vy, vz = vx * s, vy * s, vz * s
+                    self._commanded_offset[0] += vx * dt
+                    self._commanded_offset[1] += vy * dt
+                    self._commanded_offset[2] += vz * dt
+                    cap_rpy = max(0.0, self.config.max_velocity_rpy)
+                    for i in range(3, 6):
+                        vi = vcmd[i]
+                        if vi > cap_rpy:
+                            vi = cap_rpy
+                        elif vi < -cap_rpy:
+                            vi = -cap_rpy
+                        self._commanded_offset[i] += vi * dt
+                    # Keep target_offset in sync so a future mode switch
+                    # doesn't snap.
+                    with self._lock:
+                        self._target_offset = list(self._commanded_offset)
+                else:
+                    target = self._current_offset()
+                    dx = target[0] - self._commanded_offset[0]
+                    dy = target[1] - self._commanded_offset[1]
+                    dz = target[2] - self._commanded_offset[2]
+                    mag = math.sqrt(dx * dx + dy * dy + dz * dz)
+                    if mag > max_xyz_step and mag > 0.0:
+                        scale = max_xyz_step / mag
+                        dx *= scale
+                        dy *= scale
+                        dz *= scale
+                    self._commanded_offset[0] += dx
+                    self._commanded_offset[1] += dy
+                    self._commanded_offset[2] += dz
+                    for i in range(3, 6):
+                        d = target[i] - self._commanded_offset[i]
+                        if d > max_rpy_step:
+                            d = max_rpy_step
+                        elif d < -max_rpy_step:
+                            d = -max_rpy_step
+                        self._commanded_offset[i] += d
 
                 offset = list(self._commanded_offset)
                 commanded = [self._anchor[i] + offset[i] for i in range(6)]
