@@ -110,6 +110,19 @@
     state.ws.onmessage = (evt) => {
       try {
         const data = JSON.parse(evt.data);
+        // The state push has no `type` field. Confirm-broker messages do.
+        if (data && data.type === 'pick_confirm') {
+          if (typeof window.handlePickConfirm === 'function') {
+            window.handlePickConfirm(data);
+          }
+          return;
+        }
+        if (data && data.type === 'pick_confirm_resolved') {
+          if (typeof window.dismissPickConfirm === 'function') {
+            window.dismissPickConfirm(data.id);
+          }
+          return;
+        }
         updateDisplay(data);
       } catch (e) { /* ignore parse errors */ }
     };

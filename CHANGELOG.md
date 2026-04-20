@@ -12,6 +12,46 @@ HTTP / WebSocket reference.
 
 ### Added
 
+#### Vision pick — safety-gated, tool-aware, strategy-owned motion
+- **Pick-confirm broker** (`dobot_ros/web/pick_confirm.py`) — sync
+  `ask()` call that blocks the pick thread on a `threading.Event` while
+  pushing a `pick_confirm` message over the existing `/ws/state`
+  WebSocket; the browser replies via a new `POST /api/pick/confirm` and
+  the broker wakes. Handles timeout, cancel, `cancel_all()` for E-STOP,
+  and replays pending confirms on WS reconnect so a freshly opened tab
+  doesn't miss a pending modal.
+- **Pre-pick modal** summarising strategy, target, setup steps (Tool 1
+  switch / Vertical orient / lock_vertical), and full waypoint list.
+  One modal, one confirm, any-tab answers — OK proceeds, Cancel / 60 s
+  timeout aborts. Per-waypoint confirm gates: strategies can attach a
+  `confirm` string to any `PickWaypoint` to pause for an extra modal
+  before that step (e.g. `confirm_before_close` on the servo strategy).
+- **Automatic setup phase** in `/api/vision/execute`: if the robot isn't
+  already at Tool 1 with RX=180/RY=0, the orchestrator runs the tool
+  switch + vertical orient + lock_vertical enable, *then* re-plans
+  against the post-setup pose so waypoints match the fingertip frame
+  the motion will execute in. Idempotent — skips steps already in
+  place.
+- **Tool-aware strategies** — `PickContext` now carries `tool_index` and
+  `tool_length_mm`; a new `pose_z_from_table_z()` helper converts
+  "height above the table" into the correct Z for whichever tool frame
+  is active. Plans no longer silently crash or miss when Tool 1 is
+  active (previously `table_z` was always treated as wrist-frame).
+- **Forced-vertical waypoints** — existing `simple_top_down` and
+  `angled_approach` strategies now hard-code RX=180 / RY=0 on every
+  waypoint instead of inheriting `current_pose[3:5]`, so a tilted wrist
+  can't leak into a pick.
+- **New `servo_top_down` strategy** (`motion_mode="servo"`) — same
+  plan shape as Simple Top-Down, but motion is streamed through the
+  running `ServoTester` with `lock_vertical=True` and a per-strategy
+  `max_velocity_xyz` cap. Each waypoint is issued via
+  `set_target_offset()` and waited on for convergence. Inherits the
+  tester's rate-limited tick loop, pose clamp, and tool-aware floor
+  guard.
+- **`PickStrategy.execute()`** — new required method; strategies own
+  their motion (MovL `client.move_pose()` or ServoP via `ServoTester`).
+  Orchestrator stays motion-agnostic. Keeps `plan()` pure for testing.
+
 #### Web dashboard
 - Full browser dashboard at `http://localhost:7070` with real-time WebSocket
   state updates at 5 Hz. Tabs for Dashboard, Calibration, Vision, VLA, Servo,

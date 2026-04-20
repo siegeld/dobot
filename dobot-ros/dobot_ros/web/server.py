@@ -29,6 +29,9 @@ from dobot_ros.web.settings_store import (
     SettingsStore, SettingsBlocked, SettingsNotFound, SettingsConflict, SettingsError,
     _atomic_write,
 )
+from dobot_ros.web.pick_confirm import (
+    PickConfirmBroker, PickConfirmCancelled, PickConfirmTimeout,
+)
 
 
 # ── Global state ────────────────────────────────────────────────
@@ -38,6 +41,12 @@ _executor: Optional[MultiThreadedExecutor] = None
 _config: Optional[Config] = None
 _lock = threading.Lock()
 _ws_clients: set = set()
+
+# Confirm broker for vision pick gates. Push function is wired in lifespan
+# once the FastAPI event loop is running so threadpool callers can hop onto
+# it via asyncio.run_coroutine_threadsafe.
+_pick_confirm = PickConfirmBroker()
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
 
 # Cached state for polling.
 # speed_factor starts at -1 to indicate "unknown" until we've reconciled with
@@ -199,12 +208,17 @@ def _poll_state():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _main_loop
     _state["uptime_start"] = time.time()
+    _main_loop = asyncio.get_running_loop()
+    _pick_confirm.set_push_fn(_broadcast_ws)
     # Start background polling thread (handles robot + gripper state via topics)
     t1 = threading.Thread(target=_poll_state, daemon=True)
     t1.start()
     yield
     # Cleanup
+    _pick_confirm.cancel_all("server shutdown")
+    _pick_confirm.set_push_fn(None)
     global _client, _executor
     if _executor:
         try:
@@ -1504,12 +1518,25 @@ def vision_plan(req: PickPlanRequest):
         client = _get_client()
         current_pose = client.get_cartesian_pose()
 
+        # Tool frame the pick will execute under. Setup forces Tool 1, so
+        # the *plan* is computed in the fingertip frame even if Tool 0 is
+        # currently active — otherwise the preview Z would be wrist-frame
+        # and the simulated path wouldn't match what actually runs.
+        try:
+            tool_cfg = _settings_store.get("tool") or {}
+        except Exception:
+            tool_cfg = {}
+        plan_tool_index = 1
+        plan_tool_length = float(tool_cfg.get("tool_length_mm", 203.0))
+
         pick_ctx = PickContext(
             robot_x=robot_x, robot_y=robot_y,
             table_z=vt.table_z,
             min_clearance_mm=vt.min_clearance_mm,
             rotation_deg=table_rot_deg,
             current_pose=current_pose,
+            tool_index=plan_tool_index,
+            tool_length_mm=plan_tool_length,
             object_height_mm=object_height_mm,
             object_present=object_present,
             object_data=obj,
@@ -1580,10 +1607,87 @@ def vision_plan(req: PickPlanRequest):
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 
+# ── Vision pick orchestrator helpers ────────────────────────────
+
+def _build_setup_steps(client, target_tool: int = 1) -> List[str]:
+    """Return human-readable list of setup actions the orchestrator will
+    perform before the strategy executes. Empty list = robot is already
+    in the target state (Tool target_tool, vertical wrist)."""
+    steps: List[str] = []
+    current_tool = int(_state.get("tool_index", 0))
+    if current_tool != target_tool:
+        steps.append(f"Switch to Tool {target_tool} (fingertip frame)")
+    try:
+        pose = client.get_cartesian_pose()
+        if pose and len(pose) == 6:
+            rx_off = abs(((pose[3] - 180.0) + 180.0) % 360.0 - 180.0)
+            ry_off = abs(((pose[4] - 0.0) + 180.0) % 360.0 - 180.0)
+            if rx_off > 1.0 or ry_off > 1.0:
+                steps.append("Orient wrist vertical (RX=180, RY=0)")
+    except Exception:
+        steps.append("Orient wrist vertical (RX=180, RY=0)")
+    steps.append("Enable lock_vertical for the duration of the pick")
+    return steps
+
+
+def _do_pick_setup(client, target_tool: int) -> None:
+    """Perform the setup motion. Idempotent: skips actions that are already
+    in the target state. Raises on hardware error."""
+    if int(_state.get("tool_index", 0)) != target_tool:
+        logging.info("pick setup: switching to Tool %d", target_tool)
+        client.set_tool(target_tool)
+        with _lock:
+            _state["tool_index"] = target_tool
+        try:
+            _settings_store.patch("tool", {"active_index": target_tool})
+        except Exception:
+            pass
+
+    pose = client.get_cartesian_pose()
+    rx_off = abs(((pose[3] - 180.0) + 180.0) % 360.0 - 180.0)
+    ry_off = abs(((pose[4] - 0.0) + 180.0) % 360.0 - 180.0)
+    if rx_off > 1.0 or ry_off > 1.0:
+        target = [pose[0], pose[1], pose[2], 180.0, 0.0, pose[5]]
+        logging.info("pick setup: orienting wrist vertical → %s", target)
+        client.move_pose(target)
+        if not client.wait_for_cartesian_motion(target, tolerance=2.0, timeout=15.0):
+            raise RuntimeError("pick setup: vertical orient timed out")
+
+
+def _format_pick_summary(setup_steps: List[str], strategy_meta: dict,
+                         target: dict, waypoints: List[dict]) -> str:
+    lines = []
+    lines.append(f"Strategy: {strategy_meta.get('name', '?')} "
+                 f"({strategy_meta.get('slug', '')})")
+    rxy = target.get("robot_xy", [0, 0])
+    rot = target.get("table_rot_deg", 0)
+    lines.append(f"Target: X={rxy[0]:.0f}  Y={rxy[1]:.0f}  RZ={rot:.0f}°")
+    if setup_steps:
+        lines.append("")
+        lines.append("Setup before pick:")
+        for s in setup_steps:
+            lines.append(f"  • {s}")
+    lines.append("")
+    lines.append(f"Waypoints ({len(waypoints)}):")
+    for i, wp in enumerate(waypoints):
+        pose = wp.get("pose", [])
+        lbl = wp.get("label", f"step {i+1}")
+        ga = wp.get("gripper_action")
+        ga_str = f"  [grip {ga}]" if ga else ""
+        if len(pose) == 6:
+            lines.append(f"  {i+1}. {lbl}: "
+                         f"X={pose[0]:.0f} Y={pose[1]:.0f} Z={pose[2]:.0f}{ga_str}")
+        else:
+            lines.append(f"  {i+1}. {lbl}{ga_str}")
+    return "\n".join(lines)
+
+
 @app.post("/api/vision/execute")
 def vision_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool
-    """Execute a pick planned via ray-plane projection. Re-plans internally
-    to use fresh detection data. Requires confirm=true."""
+    """Execute a pick. Performs setup (Tool 1 → vertical → lock_vertical),
+    presents a single modal confirm summarising setup + plan, then hands
+    off to the strategy's own execute() (MovL or ServoP). Re-plans after
+    setup so waypoints are computed against the post-setup pose."""
     if not req.confirm:
         return JSONResponse(status_code=400,
             content={"success": False, "error": "pass confirm=true to execute"})
@@ -1593,8 +1697,14 @@ def vision_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool
         return JSONResponse(status_code=409, content={"success": False, "error": blocked})
 
     client = _get_client()
+    servo = None
+    prior_lock_vertical: Optional[bool] = None
+    prior_max_velocity_xyz: Optional[float] = None
+
     try:
-        plan_req = PickPlanRequest(**{k: getattr(req, k) for k in PickPlanRequest.model_fields.keys()})
+        # 1. Initial plan (also validates calibration / confidence).
+        plan_req = PickPlanRequest(**{k: getattr(req, k)
+                                      for k in PickPlanRequest.model_fields.keys()})
         plan_resp = vision_plan(plan_req)
         if isinstance(plan_resp, JSONResponse):
             return plan_resp
@@ -1608,51 +1718,115 @@ def vision_execute(req: PickExecuteRequest):  # NOT async — runs in threadpool
                 "error": "pick confidence is RED — too risky to execute",
                 "confidence": conf,
             })
-        import time as _time
-        wp = plan_resp["waypoints"]
-        all_wp = wp.get("all", [])
 
-        strategy_slug = plan_resp.get("strategy", {}).get("slug", "simple_top_down")
-        params = _strategy_registry.get_params(strategy_slug)
-        speed = int(params.get("move_speed", 30))
-        force = int(params.get("gripper_force", 50))
-        client.set_speed_factor(speed)
+        strategy_meta = plan_resp.get("strategy", {})
+        strategy_slug = strategy_meta.get("slug", "simple_top_down")
+        strategy = _strategy_registry.get_strategy(strategy_slug)
 
-        for i, step in enumerate(all_wp):
-            pose = step["pose"]
-            label = step.get("label", f"step {i+1}")
-            gripper_action = step.get("gripper_action")
-            gripper_pos = step.get("gripper_pos")
-            pause_s = step.get("pause_s", 0)
+        # 2. Decide setup steps; build human-readable summary; ask user.
+        setup_steps = _build_setup_steps(client, target_tool=1)
+        all_wp = plan_resp.get("waypoints", {}).get("all", [])
+        summary = _format_pick_summary(
+            setup_steps, strategy_meta, plan_resp.get("target", {}), all_wp)
+        try:
+            _pick_confirm.ask(summary, timeout_s=120.0)
+        except PickConfirmCancelled:
+            return JSONResponse(status_code=409, content={
+                "success": False, "error": "user cancelled pick"})
+        except PickConfirmTimeout:
+            return JSONResponse(status_code=408, content={
+                "success": False, "error": "pick confirm timed out"})
 
-            if gripper_action == "open" and gripper_pos is not None:
-                logging.info("vision pick [%d/%d] %s: open gripper to %d", i+1, len(all_wp), label, gripper_pos)
-                try:
-                    client.gripper_move(gripper_pos, force=force, speed=50, wait=True)
-                except Exception as e:
-                    logging.warning("gripper open failed: %s", e)
+        # 3. Run setup motion (Tool 1 + vertical orient).
+        _do_pick_setup(client, target_tool=1)
 
-            logging.info("vision pick [%d/%d] %s: move to %s", i+1, len(all_wp), label, pose)
-            client.move_pose(pose)
-            if not client.wait_for_cartesian_motion(pose, tolerance=3.0, timeout=15.0):
-                raise RuntimeError(f"step {i+1} '{label}' timed out — robot may not have arrived")
+        # 4. If servo strategy, start the tester with lock_vertical=True so
+        #    the post-setup pose becomes the anchor. Remember prior config so
+        #    we can restore it.
+        if strategy.motion_mode == "servo":
+            servo = _get_servo_tester()
+            prior_lock_vertical = bool(servo.config.lock_vertical)
+            prior_max_velocity_xyz = float(servo.config.max_velocity_xyz)
+            servo.update_config(lock_vertical=True)
+            if servo.is_running():
+                servo.stop(timeout=2.0)
+            servo.start()  # captures current pose as anchor
+        else:
+            # MovL strategy honors the per-strategy speed factor.
+            params = _strategy_registry.get_params(strategy_slug)
+            speed = int(params.get("move_speed", 30))
+            client.set_speed_factor(speed)
 
-            if pause_s > 0:
-                _time.sleep(pause_s)
+        # 5. Re-plan with the post-setup pose so waypoints match the actual
+        #    anchor (orientation, fingertip Z) the strategy will work from.
+        from dobot_ros.strategies.base import PickContext
+        vt = _get_vision_transform()
+        post_pose = client.get_cartesian_pose()
+        try:
+            tool_cfg = _settings_store.get("tool") or {}
+        except Exception:
+            tool_cfg = {}
+        target = plan_resp.get("target", {})
+        rxy = target.get("robot_xy", [0.0, 0.0])
+        rot_deg = float(target.get("table_rot_deg", 0.0))
+        depth = plan_resp.get("depth_check", {})
+        ctx = PickContext(
+            robot_x=float(rxy[0]), robot_y=float(rxy[1]),
+            table_z=vt.table_z,
+            min_clearance_mm=vt.min_clearance_mm,
+            rotation_deg=rot_deg,
+            current_pose=list(post_pose),
+            tool_index=int(_state.get("tool_index", 0)),
+            tool_length_mm=float(tool_cfg.get("tool_length_mm", 203.0)),
+            object_height_mm=float(depth.get("object_height_mm", 0.0)),
+            object_present=bool(depth.get("object_present", False)),
+            object_data=target.get("object"),
+            params=_strategy_registry.get_params(strategy_slug),
+        )
+        fresh_plan = strategy.plan(ctx)
 
-            if gripper_action == "close" and gripper_pos is not None:
-                logging.info("vision pick [%d/%d] %s: close gripper to %d", i+1, len(all_wp), label, gripper_pos)
-                try:
-                    client.gripper_move(gripper_pos, force=force, speed=50, wait=True)
-                except Exception as e:
-                    logging.warning("gripper close failed: %s", e)
+        # 6. Hand off motion to the strategy. confirm_fn closes over the
+        #    broker so per-waypoint confirms thread through the same UI.
+        def confirm_fn(msg: str) -> None:
+            _pick_confirm.ask(msg, timeout_s=60.0)
 
-        return {"success": True, "waypoints": wp, "target": plan_resp["target"],
-                "strategy": plan_resp.get("strategy")}
+        strategy.execute(ctx, fresh_plan, client, confirm_fn, servo=servo)
+
+        return {"success": True,
+                "waypoints": plan_resp["waypoints"],
+                "target": plan_resp["target"],
+                "strategy": strategy_meta,
+                "setup_steps": setup_steps}
+
+    except PickConfirmCancelled as e:
+        return JSONResponse(status_code=409,
+            content={"success": False, "error": f"cancelled: {e}"})
+    except PickConfirmTimeout as e:
+        return JSONResponse(status_code=408,
+            content={"success": False, "error": f"timeout: {e}"})
     except Exception as e:
         logging.exception("vision execute failed")
-        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+        return JSONResponse(status_code=500,
+            content={"success": False, "error": str(e)})
     finally:
+        # Servo cleanup: stop the tester and restore prior config so the
+        # next manual servo session doesn't inherit lock_vertical / speed
+        # caps from this pick.
+        if servo is not None:
+            try:
+                servo.stop(timeout=2.0)
+            except Exception:
+                pass
+            try:
+                restore = {}
+                if prior_lock_vertical is not None:
+                    restore["lock_vertical"] = prior_lock_vertical
+                if prior_max_velocity_xyz is not None:
+                    restore["max_velocity_xyz"] = prior_max_velocity_xyz
+                if restore:
+                    servo.update_config(**restore)
+            except Exception:
+                pass
         try:
             client.stop()
         except Exception:
@@ -2465,11 +2639,60 @@ async def spacemouse_settings_post(req: SpaceMouseSettingsRequest):
 
 # ── WebSocket ───────────────────────────────────────────────────
 
+def _broadcast_ws(payload: dict) -> None:
+    """Push a JSON payload to every connected /ws/state client.
+
+    Safe to call from any thread — schedules sends on the FastAPI loop via
+    run_coroutine_threadsafe. Used by the pick_confirm broker.
+    """
+    if _main_loop is None:
+        return
+    # Snapshot client set so we don't iterate while ws_state mutates it.
+    clients = list(_ws_clients)
+
+    async def _send_all():
+        dead = []
+        for ws in clients:
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            _ws_clients.discard(ws)
+
+    try:
+        asyncio.run_coroutine_threadsafe(_send_all(), _main_loop)
+    except Exception:
+        logging.exception("broadcast_ws failed")
+
+
+class PickConfirmReply(BaseModel):
+    id: str
+    choice: str
+
+
+@app.post("/api/pick/confirm")
+async def pick_confirm_reply(req: PickConfirmReply):
+    """Browser sends the user's modal choice here. Resolves the matching
+    in-flight confirm so the pick thread unblocks. Idempotent: replying to
+    an unknown or already-answered id returns success=False but doesn't
+    error (other browsers may have replied first)."""
+    ok = _pick_confirm.reply(req.id, req.choice)
+    return {"success": ok}
+
+
 @app.websocket("/ws/state")
 async def ws_state(websocket: WebSocket):
     """WebSocket endpoint for real-time robot state at ~5Hz."""
     await websocket.accept()
     _ws_clients.add(websocket)
+    # Replay any pending pick confirms so a freshly opened tab doesn't miss a
+    # modal that was pushed before it connected.
+    try:
+        for payload in _pick_confirm.list_pending():
+            await websocket.send_json(payload)
+    except Exception:
+        pass
     try:
         while True:
             with _lock:

@@ -260,28 +260,44 @@ Score 5-6 = auto-pick allowed. 3-4 = preview required. <3 = blocked.
 
 ### Architecture
 
-A pick strategy is a pluggable Python module that decides HOW to approach and grasp an object. The strategy receives a `PickContext` (robot-frame coordinates, table Z, object data) and returns a `PickPlan` (sequence of waypoints + gripper actions).
+A pick strategy is a pluggable Python module that decides HOW to approach and grasp an object. It does two things:
+
+1. **`plan(ctx)`** — pure planning code. Given a `PickContext` (robot-frame coordinates, table Z, active tool, object data) returns a `PickPlan` (sequence of waypoints + gripper actions). No I/O, no ROS calls, no camera access — easy to test.
+2. **`execute(ctx, plan, client, confirm_fn, servo=None)`** — performs the motion. MovL strategies call `client.move_pose()`; ServoP strategies stream offsets through the running `ServoTester`. Strategies own their own motion mode so the orchestrator stays motion-agnostic.
 
 ```
-Server resolves WHERE (ray projection) → Strategy decides HOW (waypoints)
+Server resolves WHERE (ray projection)
+   ↓
+Server runs setup (Tool 1 → Vertical → lock_vertical)
+   ↓
+User confirms via modal (WebSocket)
+   ↓
+Server re-plans against post-setup pose
+   ↓
+strategy.execute(...) owns the motion
 ```
-
-Strategies are pure planning code — no I/O, no ROS calls, no camera access. This makes them easy to test and swap.
 
 ### PickContext (Input)
 
 ```python
 @dataclass
 class PickContext:
-    robot_x: float          # mm, from ray-plane projection
-    robot_y: float          # mm
-    table_z: float          # mm, calibrated
-    min_clearance_mm: float # safety floor
-    rotation_deg: float     # perspective-corrected
-    current_pose: List[float]  # current [X,Y,Z,RX,RY,RZ]
-    object_height_mm: float # from depth estimate
-    object_present: bool    # from depth check
-    params: dict            # strategy-specific parameters from JSON
+    robot_x: float             # mm, from ray-plane projection
+    robot_y: float             # mm
+    table_z: float             # mm, wrist Z when tip touched table (calibration)
+    min_clearance_mm: float    # safety floor above table
+    rotation_deg: float        # perspective-corrected, true table-plane rot
+    current_pose: List[float]  # post-setup [X,Y,Z,RX,RY,RZ]
+    tool_index: int            # 0 = wrist, 1 = fingertip
+    tool_length_mm: float      # offset for Tool ≥1 (e.g. 203mm for AG-105)
+    object_height_mm: float    # from depth estimate (0 if not detected)
+    object_present: bool       # from depth check
+    params: dict               # strategy-specific parameters from JSON
+
+    def pose_z_from_table_z(self, height_above_table: float) -> float
+        # Converts "height above table surface" → pose Z in active tool frame.
+        # Tool 0: table_z + height_above_table    (table_z is wrist frame)
+        # Tool N: table_z - tool_length_mm + height_above_table
 ```
 
 ### PickPlan (Output)
@@ -290,7 +306,7 @@ class PickContext:
 @dataclass
 class PickPlan:
     waypoints: List[PickWaypoint]  # ordered sequence
-    move_speed: Optional[int]      # robot speed factor
+    move_speed: Optional[int]      # robot speed factor (MovL only)
 
 @dataclass
 class PickWaypoint:
@@ -299,12 +315,15 @@ class PickWaypoint:
     pause_s: float                 # dwell after arriving
     gripper_action: Optional[str]  # "open" | "close" | None
     gripper_pos: Optional[int]     # 0-1000
+    confirm: Optional[str]         # if set, orchestrator modal-confirms BEFORE this wp
 ```
 
 ### Built-in Strategies
 
-**Simple Top-Down** (`simple_top_down.py`):
-Straight vertical approach from directly above. 4 waypoints:
+All strategies force the wrist to RX=180, RY=0 at every waypoint — the setup phase guarantees the robot is vertical and `lock_vertical` is on, so the pick never inherits a tilted wrist from the prior pose.
+
+**Simple Top-Down (MovL)** (`simple_top_down.py`, `motion_mode="movl"`):
+Straight vertical approach from directly above, point-to-point MovL between waypoints. 4 waypoints:
 1. Open gripper at approach height
 2. Descend to grasp Z
 3. Close gripper
@@ -312,7 +331,7 @@ Straight vertical approach from directly above. 4 waypoints:
 
 Parameters: approach_height, grasp_clearance, lift_height, gripper open/close positions, force, speed, use_object_height.
 
-**Angled Approach** (`angled_approach.py`):
+**Angled Approach (MovL)** (`angled_approach.py`, `motion_mode="movl"`):
 Approach from a lateral offset, then drop straight down. 5 waypoints:
 1. Open gripper at hover point (laterally offset from target)
 2. Move to approach (directly above target)
@@ -322,14 +341,34 @@ Approach from a lateral offset, then drop straight down. 5 waypoints:
 
 Additional parameters: hover_height, approach_offset, approach_direction (auto/back/left/right/front), pre_rotate.
 
+**Servo Top-Down (ServoP)** (`servo_top_down.py`, `motion_mode="servo"`):
+Same waypoint shape as Simple Top-Down, but motion is streamed through the `ServoTester` instead of point-to-point MovL. Inherits the tester's rate-limited tick loop (`max_velocity_xyz` gives a hard cap on actual end-effector speed regardless of waypoint distance), `lock_vertical` force-projection (every emitted pose is clamped to RX=180/RY=0), and tool-aware floor guard. Each waypoint is issued via `set_target_offset()` and waited on until the tester's commanded offset converges within `converge_tol_mm`.
+
+Additional parameters: `max_velocity_xyz` (linear speed cap during pick), `converge_tol_mm`, `waypoint_timeout_s`, `confirm_before_close` (if true, inserts a per-waypoint confirm gate right before the gripper close).
+
+### Setup Phase and Confirm Broker
+
+Every pick runs through a mandatory setup + confirmation sequence before any motion:
+
+1. **Build setup list**: check active tool and current wrist RX/RY. Insert `Switch to Tool 1`, `Orient wrist vertical`, and `Enable lock_vertical` steps — steps the robot is already in get skipped.
+2. **Modal confirm**: `PickConfirmBroker.ask()` pushes a `pick_confirm` message over the existing `/ws/state` WebSocket with the summary (strategy + target + setup steps + waypoint list). The Python worker thread blocks on a `threading.Event` until the browser POSTs to `/api/pick/confirm`, or 120 s timeout.
+3. **Run setup motion**: idempotent — only moves what's not already in place.
+4. **Re-plan** against the post-setup pose (so waypoint Z uses the now-active tool frame).
+5. **Hand off** to `strategy.execute(...)`. Any waypoint with a `confirm` string pauses for another modal before running.
+
+E-STOP cancels all pending confirms via `broker.cancel_all()` so stuck modals can't deadlock the next pick. Multiple connected browsers replay pending confirms on connect and share a first-reply-wins dismissal.
+
+**Implementation**: `dobot_ros/web/pick_confirm.py`, `dobot_ros/web/server.py` (`vision_execute`), `app-vision.js` (`handlePickConfirm`).
+
 ### Adding a New Strategy
 
 1. Create `dobot_ros/strategies/my_strategy.py`
-2. Subclass `PickStrategy`, set `name`, `slug`, `description`
+2. Subclass `PickStrategy`, set `name`, `slug`, `description`, `motion_mode` (`"movl"` or `"servo"`)
 3. Implement `parameter_defs()` → returns list of `ParameterDef`
 4. Implement `plan(ctx: PickContext)` → returns `PickPlan`
-5. Create `dobot_ros/strategies/params/my_strategy.json` with defaults
-6. Restart the web server — the registry auto-discovers it
+5. Implement `execute(ctx, plan, client, confirm_fn, servo=None)` — issue motion; call `confirm_fn(msg)` before any gated waypoint (it raises on cancel/timeout)
+6. Create `dobot_ros/strategies/params/my_strategy.json` with defaults
+7. Restart the web server — the registry auto-discovers it
 
 No server or GUI changes needed. The registry scans for `PickStrategy` subclasses at startup, and the GUI renders the parameter form dynamically from `parameter_defs()`.
 
@@ -440,13 +479,20 @@ Setup-only. Three phases:
 | `/api/vision/status` | GET | Calibration state, table Z, intrinsics |
 | `/api/vision/calibrate` | POST | Solve extrinsics from correspondence points |
 | `/api/vision/plan` | POST | Plan a pick (ray projection + strategy) |
-| `/api/vision/execute` | POST | Execute (requires `confirm: true`) |
+| `/api/vision/execute` | POST | Execute (requires `confirm: true`). Runs setup + modal confirm + re-plan + strategy.execute |
 | `/api/vision/grid` | GET | Table-plane grid as pixel coordinates |
 | `/api/detection/objects` | GET | Proxy to camera server's object detection |
 | `/api/inverse-kin` | POST | Compute joint angles for simulation |
-| `/api/strategies/list` | GET | All strategies with parameter definitions |
+| `/api/pick/confirm` | POST | Browser → backend reply for a pending `pick_confirm` modal (`{id, choice}`) |
+| `/api/strategies/list` | GET | All strategies with parameter definitions + `motion_mode` |
 | `/api/strategies/active` | GET/POST | Active strategy selection |
 | `/api/strategies/{slug}/params` | GET/POST | Per-strategy parameter values |
+
+**WebSocket messages** on `/ws/state` (in addition to the state push):
+| `type`                     | Direction | Fields                                  |
+|----------------------------|-----------|-----------------------------------------|
+| `pick_confirm`             | server → browser | `{id, summary, choices[]}` — show modal |
+| `pick_confirm_resolved`    | server → browser | `{id, choice}` — dismiss modal (another browser answered) |
 
 ---
 
@@ -460,16 +506,22 @@ dobot_ros/
 ├── vision.py              # Camera server HTTP client (detection, depth, transform)
 ├── pick.py                # Legacy pick executor (still works, uses camera-server transform)
 ├── strategies/
-│   ├── base.py            # PickStrategy ABC, ParameterDef, PickContext, PickPlan
-│   ├── simple_top_down.py # Strategy 1: vertical approach (8 params)
-│   ├── angled_approach.py # Strategy 2: lateral approach (11 params)
+│   ├── base.py            # PickStrategy ABC, ParameterDef, PickContext (tool-aware),
+│   │                      # PickPlan, PickWaypoint (with confirm gate)
+│   ├── simple_top_down.py # Vertical MovL approach (motion_mode="movl")
+│   ├── angled_approach.py # Lateral MovL hover + drop (motion_mode="movl")
+│   ├── servo_top_down.py  # Vertical ServoP approach through ServoTester (motion_mode="servo")
 │   └── params/            # Per-strategy JSON parameter files
 ├── web/
-│   ├── server.py          # FastAPI: /api/vision/*, /api/strategies/*, pick execution
+│   ├── server.py          # FastAPI: /api/vision/*, /api/strategies/*, pick orchestrator
+│   ├── pick_confirm.py    # PickConfirmBroker: modal request/reply over WS
 │   ├── vision_calibration.json  # Stored R, t, intrinsics, table_z (from Solve)
-│   └── static/js/
-│       ├── app.js         # Vision tab UI: overlays, strategy form, preview, simulate
-│       └── robot3d.js     # 3D view: gripper viz, simulation mode
+│   └── static/
+│       ├── index.html     # Includes #pick-confirm-modal (Bootstrap, static backdrop)
+│       └── js/
+│           ├── app.js         # WS dispatcher routes pick_confirm to window.handlePickConfirm
+│           ├── app-vision.js  # Vision tab UI + modal handler
+│           └── robot3d.js     # 3D view: gripper viz, simulation mode
 └── vla/
     └── safety.py          # Workspace clamps (also used by servo tester)
 ```

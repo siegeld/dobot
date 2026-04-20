@@ -144,6 +144,15 @@ regardless of which tool is selected.
   from fighting.
 - **Driver watchdog** (feedback-stale detector) and **SpaceMouse on-disarm
   hook** exist to self-heal stuck states without operator intervention.
+- **Pick-confirm broker** (`dobot_ros/web/pick_confirm.py`) is a sync
+  ask/reply primitive owned by the web layer. Pick-execution threadpool
+  workers call `ask(summary)` which pushes a `pick_confirm` message over
+  the existing `/ws/state` WebSocket via
+  `asyncio.run_coroutine_threadsafe` and blocks on a `threading.Event`.
+  Browser POSTs to `/api/pick/confirm`; broker resolves the event; worker
+  continues. Handles timeout, cancel, reconnect replay, and E-STOP
+  `cancel_all()`. The vision pick orchestrator uses it for the unified
+  pre-pick modal; strategies can attach per-waypoint confirm gates.
 
 ## Key files
 
@@ -162,6 +171,8 @@ regardless of which tool is selected.
 | `dobot-ros/dobot_ros/vla/executor.py` | OpenVLA-OFT chunked-inference streaming loop |
 | `dobot-ros/dobot_ros/vla/safety.py` | Workspace clamps, limit loading from `table_plane.json` |
 | `dobot-ros/dobot_ros/web/server.py` | FastAPI + WebSocket routes (see `API.md`) |
+| `dobot-ros/dobot_ros/web/pick_confirm.py` | `PickConfirmBroker` — sync `ask()` / `reply()` primitive for pick-time modals |
+| `dobot-ros/dobot_ros/strategies/` | Pick-strategy plugins (`base.py` ABC, `simple_top_down.py`, `angled_approach.py`, `servo_top_down.py`); per-strategy defaults in `params/*.json` |
 | `dobot-ros/dobot_ros/web/static/js/app.js` | Dashboard core (state, WS, display, robot/jog/gripper wiring) |
 | `dobot-ros/dobot_ros/web/static/js/app-*.js` | Feature modules: vla, servo, settings, calibration, vision, sidebar, misc |
 | `DOBOT_6Axis_ROS2_V4/dobot_bringup_v4/src/` | Vendor C++ driver source (submodule) |

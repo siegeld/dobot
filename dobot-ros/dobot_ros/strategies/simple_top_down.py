@@ -1,7 +1,8 @@
-"""Strategy: Simple Top-Down Pick.
+"""Strategy: Simple Top-Down Pick (MovL).
 
-Straight vertical approach from directly above the object. The most basic
-and safest strategy — good baseline for testing calibration accuracy.
+Straight vertical approach from directly above the object, using point-to-
+point MovL motion between waypoints. Safe baseline for testing calibration
+accuracy.
 
 Waypoints:
   1. Open gripper
@@ -9,21 +10,30 @@ Waypoints:
   3. Descend to grasp Z
   4. Close gripper
   5. Retract straight up
+
+The wrist is forced vertical (RX=180, RY=0) for every waypoint — the
+orchestrator runs Vertical + Lock during setup, so the pick never inherits
+a tilted wrist from the prior pose.
 """
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import List
 
 from dobot_ros.strategies.base import (
-    ParameterDef, PickContext, PickPlan, PickStrategy, PickWaypoint,
+    ConfirmFn, ParameterDef, PickContext, PickPlan, PickStrategy, PickWaypoint,
 )
+
+log = logging.getLogger(__name__)
 
 
 class SimpleTopDown(PickStrategy):
-    name = "Simple Top-Down"
+    name = "Simple Top-Down (MovL)"
     slug = "simple_top_down"
-    description = "Straight vertical approach from above. Safe baseline for testing."
+    description = "Straight vertical approach via point-to-point MovL. Safe baseline."
+    motion_mode = "movl"
 
     @classmethod
     def parameter_defs(cls) -> List[ParameterDef]:
@@ -64,18 +74,21 @@ class SimpleTopDown(PickStrategy):
         close_pos = int(p.get("gripper_close_pos", 200))
         speed = int(p.get("move_speed", 30))
 
-        # Grasp Z: table surface + clearance, optionally adjusted for object height.
-        # SAFETY: always enforce min_clearance_mm as the absolute floor.
-        grasp_z = ctx.table_z + max(clearance, ctx.min_clearance_mm)
+        # Heights above table surface. SAFETY: always enforce min_clearance_mm
+        # as the absolute floor; object_height only ever raises grasp.
+        grasp_above = max(clearance, ctx.min_clearance_mm)
         if use_height and ctx.object_present and ctx.object_height_mm > 10:
-            height_z = ctx.table_z + ctx.object_height_mm / 2.0
-            grasp_z = max(grasp_z, height_z)  # only raise, never lower below clearance
+            grasp_above = max(grasp_above, ctx.object_height_mm / 2.0)
 
-        approach_z = grasp_z + approach_h
-        retract_z = grasp_z + lift_h
+        # Convert "height above table" to a pose Z in the active tool frame.
+        grasp_z = ctx.pose_z_from_table_z(grasp_above)
+        approach_z = ctx.pose_z_from_table_z(grasp_above + approach_h)
+        retract_z = ctx.pose_z_from_table_z(grasp_above + lift_h)
 
-        # Preserve current wrist orientation (RX, RY), set RZ to object rotation.
-        rx, ry = ctx.current_pose[3], ctx.current_pose[4]
+        # Force vertical: setup phase guarantees the wrist is at (180, 0)
+        # and lock_vertical is on. Hard-coding here makes plans previewable
+        # without depending on whether setup has run yet.
+        rx, ry = 180.0, 0.0
         rz = ctx.rotation_deg
 
         return PickPlan(
@@ -103,3 +116,35 @@ class SimpleTopDown(PickStrategy):
                 ),
             ],
         )
+
+    def execute(self, ctx, plan, client, confirm_fn: ConfirmFn, servo=None) -> None:
+        force = int(ctx.params.get("gripper_force", 50))
+        for i, wp in enumerate(plan.waypoints):
+            if wp.confirm:
+                confirm_fn(wp.confirm)  # raises on cancel/timeout
+
+            if wp.gripper_action == "open" and wp.gripper_pos is not None:
+                log.info("simple_top_down [%d/%d] %s: open gripper → %d",
+                         i + 1, len(plan.waypoints), wp.label, wp.gripper_pos)
+                try:
+                    client.gripper_move(wp.gripper_pos, force=force, speed=50, wait=True)
+                except Exception as e:
+                    log.warning("gripper open failed: %s", e)
+
+            log.info("simple_top_down [%d/%d] %s → %s",
+                     i + 1, len(plan.waypoints), wp.label, wp.pose)
+            client.move_pose(wp.pose)
+            if not client.wait_for_cartesian_motion(wp.pose, tolerance=3.0, timeout=15.0):
+                raise RuntimeError(
+                    f"step {i+1} '{wp.label}' timed out — robot may not have arrived")
+
+            if wp.pause_s > 0:
+                time.sleep(wp.pause_s)
+
+            if wp.gripper_action == "close" and wp.gripper_pos is not None:
+                log.info("simple_top_down [%d/%d] %s: close gripper → %d",
+                         i + 1, len(plan.waypoints), wp.label, wp.gripper_pos)
+                try:
+                    client.gripper_move(wp.gripper_pos, force=force, speed=50, wait=True)
+                except Exception as e:
+                    log.warning("gripper close failed: %s", e)

@@ -537,6 +537,70 @@
   }
 
 
+  // ── Pick-confirm modal (driven by WS messages) ─────────────────
+  //
+  // Backend's PickConfirmBroker pushes {type: "pick_confirm", id, summary,
+  // choices} over the existing /ws/state channel. We own a single modal
+  // instance; show it on request, POST the clicked choice to
+  // /api/pick/confirm, and dismiss when the server broadcasts
+  // pick_confirm_resolved (covers the case where another browser window
+  // answered first). Handler functions are exposed on window because the
+  // WS dispatcher in app.js looks them up by name.
+
+  let _confirmModal = null;
+  let _confirmCurrentId = null;
+
+  function _getConfirmModal() {
+    if (_confirmModal) return _confirmModal;
+    const el = document.getElementById('pick-confirm-modal');
+    if (!el) return null;
+    _confirmModal = bootstrap.Modal.getOrCreateInstance(el);
+    return _confirmModal;
+  }
+
+  window.handlePickConfirm = function (data) {
+    const modal = _getConfirmModal();
+    if (!modal) return;
+    _confirmCurrentId = data.id;
+    document.getElementById('pick-confirm-summary').textContent = data.summary || '';
+    const footer = document.getElementById('pick-confirm-buttons');
+    footer.innerHTML = '';
+    const choices = Array.isArray(data.choices) && data.choices.length
+      ? data.choices : ['OK', 'Cancel'];
+    choices.forEach((choice, idx) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      // First choice is the affirmative action (primary style). Everything
+      // else is rendered as a cancel / secondary button.
+      btn.className = 'btn ' + (idx === 0 ? 'btn-primary' : 'btn-outline-secondary');
+      btn.textContent = choice;
+      btn.addEventListener('click', () => _replyConfirm(data.id, choice));
+      footer.appendChild(btn);
+    });
+    modal.show();
+  };
+
+  window.dismissPickConfirm = function (id) {
+    if (_confirmCurrentId && id && _confirmCurrentId !== id) return;
+    _confirmCurrentId = null;
+    _getConfirmModal()?.hide();
+  };
+
+  async function _replyConfirm(id, choice) {
+    // Hide first so the UI feels instant; the server resolves asynchronously.
+    _confirmCurrentId = null;
+    _getConfirmModal()?.hide();
+    try {
+      await fetch('/api/pick/confirm', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id, choice}),
+      });
+    } catch (e) {
+      showToast(`Confirm reply failed: ${e}`, 'danger');
+    }
+  }
+
   // Register the init for app.js's init() flow.
   window.DobotUI = window.DobotUI || {};
   window.DobotUI.initVisionTab = initVisionTab;

@@ -88,8 +88,9 @@ Gripper state is also pushed over the `/ws/state` stream at 5 Hz.
 | GET | `/api/vision/status` | — | calibrated?, table_z, intrinsics |
 | GET | `/api/vision/grid` | — | Table-plane grid projected to pixel coords (for the overlay) |
 | POST | `/api/vision/calibrate` | `{…}` | Solve the camera-to-robot transform |
-| POST | `/api/vision/plan` | `{object_id?, px?, py?}` | Plan a pick from the Vision tab |
-| POST | `/api/vision/execute` | `{object_id?, px?, py?, confirm: true}` | Execute a vision pick |
+| POST | `/api/vision/plan` | `{object_id?, px?, py?}` | Plan a pick from the Vision tab. Plan is computed against Tool 1 / fingertip frame (the frame the executor will use after setup) |
+| POST | `/api/vision/execute` | `{object_id?, px?, py?, confirm: true}` | Execute a vision pick. Runs a mandatory setup phase (auto-switch to Tool 1 if not active, orient wrist vertical if not already, enable `lock_vertical`), then presents a single modal via `pick_confirm` on `/ws/state`. After user OK, re-plans against the post-setup pose and delegates motion to the active strategy (MovL or ServoP based on `motion_mode`). 409 on user Cancel; 408 on confirm timeout |
+| POST | `/api/pick/confirm` | `{id, choice}` | Browser replies to a pending `pick_confirm` modal. Idempotent: replying to an unknown or already-resolved id returns `success: false` without error (another browser may have answered first) |
 | POST | `/api/inverse-kin` | `{poses: [[6]…]}` | Batch IK for simulation rendering |
 
 ## VLA (Vision-Language-Action)
@@ -156,10 +157,19 @@ hook also releases the server motion lock, so subsequent arms succeed.
 
 | Path | Direction | Payload |
 |---|---|---|
-| `/ws/state` | server → client | Full `/api/status`-shape JSON pushed at 5 Hz; used by the dashboard for live joint/cartesian/gripper/mode updates |
+| `/ws/state` | server → client | Full `/api/status`-shape JSON pushed at 5 Hz; used by the dashboard for live joint/cartesian/gripper/mode updates. Also carries out-of-band `pick_confirm` / `pick_confirm_resolved` messages (see below) |
 | `/ws/spacemouse` | server → client | HID state snapshot — axes, buttons, device_status, armed, offset, event-age, idle |
 
 Both are push-only; the client doesn't send frames.
+
+**Pick-confirm messages on `/ws/state`** (dispatched client-side by `data.type`):
+
+| `type` | Fields | Meaning |
+|---|---|---|
+| `pick_confirm` | `{id, summary, choices}` | Backend wants a modal answered before the pick proceeds. Choices[0] is the affirmative action |
+| `pick_confirm_resolved` | `{id, choice}` | Another tab answered — dismiss the modal if still shown |
+
+Pending confirms are replayed to each newly connected `/ws/state` client so a freshly opened tab doesn't miss a modal that was pushed before it connected. Reply via `POST /api/pick/confirm`.
 
 ## Error handling conventions
 

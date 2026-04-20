@@ -1,14 +1,20 @@
 """Base class and data types for pick strategies.
 
 A pick strategy is a pluggable Python module that decides HOW to pick an
-object once the Vision system has resolved WHERE it is. Strategies are
-pure planning code — they receive a PickContext (robot-frame coordinates,
-table Z, object data) and return a PickPlan (sequence of waypoints +
-gripper actions). No I/O, no ROS calls, no camera access.
+object once the Vision system has resolved WHERE it is. Strategies do two
+things:
 
-Each strategy defines its own tunable parameters via parameter_defs().
-The current values live in a JSON file alongside the strategy code.
-The GUI renders a form for them dynamically.
+  1. plan(ctx)         — compute a PickPlan (waypoints, gripper actions)
+                         given a PickContext. Pure: no I/O, no ROS calls.
+  2. execute(...)      — perform the motion. MovL strategies issue point-
+                         to-point poses; ServoP strategies stream offsets
+                         through the ServoTester. Strategies own their
+                         motion mode so the orchestrator stays motion-
+                         agnostic.
+
+Each strategy defines its own tunable parameters via parameter_defs(); the
+current values live in a JSON file alongside the strategy code, and the
+GUI renders a form for them dynamically.
 """
 
 from __future__ import annotations
@@ -16,7 +22,7 @@ from __future__ import annotations
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 
 @dataclass
@@ -67,6 +73,11 @@ class PickContext:
 
     Pre-resolved by the server layer — strategies never touch VisionTransform,
     the camera, or the ROS client directly.
+
+    Tool-frame note: ``table_z`` is recorded as the *wrist* Z when the
+    gripper tip touches the table (single-touch calibration). Strategies
+    that emit cartesian poses must adapt this to whichever tool frame is
+    active when the pick runs — use ``pose_z_from_table_z()``.
     """
     robot_x: float              # mm, table-plane projected
     robot_y: float              # mm
@@ -80,7 +91,29 @@ class PickContext:
     object_present: bool = False
     object_data: Optional[dict] = None  # raw detection dict from camera
 
+    # Active tool frame at execution time. Index 0 = wrist; index ≥1 means
+    # the controller's TCS shifts pose reporting/commanding to the tool tip
+    # (typically Tool 1 with tool_length_mm=203 for the AG-105 fingertip).
+    tool_index: int = 0
+    tool_length_mm: float = 0.0
+
     params: dict = field(default_factory=dict)  # strategy params from JSON
+
+    def pose_z_from_table_z(self, target_z_above_table: float) -> float:
+        """Convert a desired *height above the table* into the Z value to
+        put in a cartesian pose, accounting for the active tool frame.
+
+        With Tool 0 active, pose Z is the wrist height; commanding
+        ``table_z + h`` puts the tip ``h`` mm above the table.
+
+        With Tool ≥1 active, pose Z is the tip height directly; commanding
+        ``table_z - tool_length_mm + h`` puts the tip ``h`` mm above the
+        table (since wrist_at_floor − tool_length = tip_at_floor = 0 in
+        tool coords, plus the desired clearance).
+        """
+        if self.tool_index == 0:
+            return self.table_z + target_z_above_table
+        return self.table_z - self.tool_length_mm + target_z_above_table
 
 
 @dataclass
@@ -91,6 +124,10 @@ class PickWaypoint:
     pause_s: float = 0.0                    # dwell time after arriving
     gripper_action: Optional[str] = None    # "open" | "close" | None
     gripper_pos: Optional[int] = None       # 0-1000, used with gripper_action
+    # If set, the orchestrator pauses BEFORE this waypoint and asks the user
+    # to confirm via the pick_confirm broker. Lets a strategy gate any step
+    # behind a manual approval (e.g. the final descent, or the close).
+    confirm: Optional[str] = None
 
 
 @dataclass
@@ -100,15 +137,25 @@ class PickPlan:
     move_speed: Optional[int] = None  # override global speed if set
 
 
+# Type aliases used by execute() so subclasses don't need to import the
+# server's broker just to declare their signature.
+ConfirmFn = Callable[[str], None]
+"""Raises PickConfirmCancelled / PickConfirmTimeout if the user declines."""
+
+GripperFn = Callable[..., None]
+"""client.gripper_move(pos, force=..., speed=..., wait=True)-shaped callable."""
+
+
 class PickStrategy(ABC):
     """Abstract base for pick strategies.
 
     Subclasses must set name, slug, description as class attributes and
-    implement parameter_defs() and plan().
+    implement parameter_defs(), plan(), and execute().
     """
     name: str = "Unnamed"
     slug: str = "unnamed"
     description: str = ""
+    motion_mode: str = "movl"   # "movl" | "servo" — for UI labelling
 
     @classmethod
     @abstractmethod
@@ -121,10 +168,37 @@ class PickStrategy(ABC):
         """Given a pick context, compute the full waypoint sequence."""
         ...
 
+    @abstractmethod
+    def execute(
+        self,
+        ctx: PickContext,
+        plan: PickPlan,
+        client,
+        confirm_fn: ConfirmFn,
+        servo=None,
+    ) -> None:
+        """Carry out the motion. Setup (Tool/Vertical/Lock) is handled by
+        the orchestrator before this is called — execute() runs against an
+        already-vertical, locked, Tool-1 robot.
+
+        Strategies should:
+          - Honor each waypoint's ``confirm`` field by calling ``confirm_fn``
+            BEFORE the move (it raises on cancel/timeout — let it propagate).
+          - Issue gripper actions before/after the corresponding move per
+            ``gripper_action``.
+          - Treat exceptions as fatal: the orchestrator's ``finally`` will
+            stop motion and release the motion lock.
+
+        ``servo`` is the running ServoTester instance, passed to strategies
+        with ``motion_mode == "servo"``. MovL strategies ignore it.
+        """
+        ...
+
     def metadata(self) -> dict:
         return {
             "name": self.name,
             "slug": self.slug,
             "description": self.description,
+            "motion_mode": self.motion_mode,
             "parameters": [p.to_dict() for p in self.parameter_defs()],
         }

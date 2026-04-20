@@ -1,4 +1,4 @@
-"""Strategy: Angled Approach Pick.
+"""Strategy: Angled Approach Pick (MovL).
 
 Approaches the object from an offset direction at a configurable angle,
 then drops straight down to grasp. Useful when top-down clearance is
@@ -11,22 +11,30 @@ Waypoints:
   4. Descend to grasp Z
   5. Close gripper
   6. Retract straight up
+
+The wrist is forced vertical (RX=180, RY=0) for every waypoint — the
+orchestrator runs Vertical + Lock during setup.
 """
 
 from __future__ import annotations
 
+import logging
 import math
+import time
 from typing import List
 
 from dobot_ros.strategies.base import (
-    ParameterDef, PickContext, PickPlan, PickStrategy, PickWaypoint,
+    ConfirmFn, ParameterDef, PickContext, PickPlan, PickStrategy, PickWaypoint,
 )
+
+log = logging.getLogger(__name__)
 
 
 class AngledApproach(PickStrategy):
-    name = "Angled Approach"
+    name = "Angled Approach (MovL)"
     slug = "angled_approach"
-    description = "Approach from an offset direction at an angle, then drop straight to grasp."
+    description = "Lateral hover then drop straight via point-to-point MovL."
+    motion_mode = "movl"
 
     @classmethod
     def parameter_defs(cls) -> List[ParameterDef]:
@@ -105,16 +113,17 @@ class AngledApproach(PickStrategy):
         speed = int(p.get("move_speed", 25))
 
         # SAFETY: always enforce min_clearance_mm as the absolute floor.
-        grasp_z = ctx.table_z + max(clearance, ctx.min_clearance_mm)
+        grasp_above = max(clearance, ctx.min_clearance_mm)
         if ctx.object_present and ctx.object_height_mm > 10:
-            height_z = ctx.table_z + ctx.object_height_mm / 2.0
-            grasp_z = max(grasp_z, height_z)  # only raise, never lower below clearance
+            grasp_above = max(grasp_above, ctx.object_height_mm / 2.0)
 
-        approach_z = grasp_z + approach_h
-        hover_z = grasp_z + hover_h
-        retract_z = grasp_z + lift_h
+        grasp_z = ctx.pose_z_from_table_z(grasp_above)
+        approach_z = ctx.pose_z_from_table_z(grasp_above + approach_h)
+        hover_z = ctx.pose_z_from_table_z(grasp_above + hover_h)
+        retract_z = ctx.pose_z_from_table_z(grasp_above + lift_h)
 
-        rx, ry = ctx.current_pose[3], ctx.current_pose[4]
+        # Force vertical (setup phase guarantees the locked vertical wrist).
+        rx, ry = 180.0, 0.0
         rz_target = ctx.rotation_deg
         rz_hover = rz_target if pre_rotate else ctx.current_pose[5]
 
@@ -152,3 +161,35 @@ class AngledApproach(PickStrategy):
                 ),
             ],
         )
+
+    def execute(self, ctx, plan, client, confirm_fn: ConfirmFn, servo=None) -> None:
+        force = int(ctx.params.get("gripper_force", 50))
+        for i, wp in enumerate(plan.waypoints):
+            if wp.confirm:
+                confirm_fn(wp.confirm)
+
+            if wp.gripper_action == "open" and wp.gripper_pos is not None:
+                log.info("angled_approach [%d/%d] %s: open gripper → %d",
+                         i + 1, len(plan.waypoints), wp.label, wp.gripper_pos)
+                try:
+                    client.gripper_move(wp.gripper_pos, force=force, speed=50, wait=True)
+                except Exception as e:
+                    log.warning("gripper open failed: %s", e)
+
+            log.info("angled_approach [%d/%d] %s → %s",
+                     i + 1, len(plan.waypoints), wp.label, wp.pose)
+            client.move_pose(wp.pose)
+            if not client.wait_for_cartesian_motion(wp.pose, tolerance=3.0, timeout=15.0):
+                raise RuntimeError(
+                    f"step {i+1} '{wp.label}' timed out — robot may not have arrived")
+
+            if wp.pause_s > 0:
+                time.sleep(wp.pause_s)
+
+            if wp.gripper_action == "close" and wp.gripper_pos is not None:
+                log.info("angled_approach [%d/%d] %s: close gripper → %d",
+                         i + 1, len(plan.waypoints), wp.label, wp.gripper_pos)
+                try:
+                    client.gripper_move(wp.gripper_pos, force=force, speed=50, wait=True)
+                except Exception as e:
+                    log.warning("gripper close failed: %s", e)

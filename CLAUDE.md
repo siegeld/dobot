@@ -85,6 +85,15 @@ Tool selection is applied via the `Tool` ROS service, persisted to the settings 
 
 **Historical workspace-protection note**: early attempts at setting `SetTool(1, {0,0,203,0,0,0})` triggered error 1479 because the TCP Z dropped below the controller's floor protection limit. Once the workspace protection limits were loosened in Dobot Studio, `Tool(1)` works and is now the canonical fingertip frame.
 
+## Vision pick flow
+
+- `/api/vision/execute` is the canonical entry point. Don't bypass it.
+- It **auto-switches to Tool 1**, orients the wrist vertical, enables `lock_vertical`, and **re-plans against the post-setup pose** before any strategy motion runs. The setup phase is idempotent — steps already in place are skipped.
+- Every pick shows a **modal confirmation** over `/ws/state` (`pick_confirm` message type, broker at `dobot_ros/web/pick_confirm.py`). The browser replies via `POST /api/pick/confirm`. User Cancel → 409, 120 s timeout → 408.
+- Strategies have two methods: pure `plan(ctx)` (testable, no I/O) and `execute(ctx, plan, client, confirm_fn, servo=None)` which owns the motion. `motion_mode` class attr is `"movl"` or `"servo"`.
+- When adding a strategy, use `ctx.pose_z_from_table_z(height_above_table)` instead of `table_z + clearance` — it handles the Tool 0 vs Tool 1 frame difference. Don't preserve `current_pose[3:5]` for wrist orientation; hard-code RX=180 / RY=0 (setup guarantees this is where the wrist already is).
+- Servo strategies receive the running `ServoTester`; the orchestrator starts it with the post-setup pose as the anchor and restores the tester's prior `lock_vertical` and `max_velocity_xyz` on exit.
+
 ## Calibration
 
 Two independent calibrations stored on the robot web server:
