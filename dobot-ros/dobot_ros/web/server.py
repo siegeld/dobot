@@ -1894,11 +1894,13 @@ def _get_servo_tester():
             )
 
             # Subscribe so future store updates push into the running tester.
+            # Key list must match _SERVO_CONFIG_KEYS / ServoTester._CONFIG_TYPES
+            # — otherwise keys saved via /api/servo/config persist to disk
+            # but never reach the live tester until container restart.
             def _on_servo_change(new_cfg: dict):
                 try:
                     _servo_tester.update_config(**{
-                        k: v for k, v in new_cfg.items()
-                        if k in ("servo_rate_hz", "t", "aheadtime", "gain", "idle_timeout_s")
+                        k: v for k, v in new_cfg.items() if k in _SERVO_CONFIG_KEYS
                     })
                 except Exception:
                     logging.exception("failed to apply servo settings update")
