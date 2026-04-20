@@ -133,17 +133,16 @@ def _poll_state():
                     _state["robot_mode"] = mode
                     _state["connected"] = not stale
                     _state["error"] = "Robot feedback stale — robot may be offline" if stale else None
-                    # Driver watchdog: signal the driver container to restart
-                    # when the feedback port (30004) goes stale.
-                    if stale:
-                        try:
-                            restart_file = Path("/tmp/dobot-shared/driver_restart")
-                            if not restart_file.exists():
-                                restart_file.parent.mkdir(parents=True, exist_ok=True)
-                                restart_file.touch()
-                                logging.warning("Feedback stale — signaled driver restart via %s", restart_file)
-                        except Exception as wdog_err:
-                            logging.debug("watchdog signal failed: %s", wdog_err)
+                    # Driver watchdog DISABLED 2026-04-20: SIGTERM'ing the
+                    # ROS node leaves the robot's 29999 session-tracking
+                    # table confused (fd-leak bug in vendor tcp_socket.cpp
+                    # disConnect() means FIN never reaches the robot). Each
+                    # triggered restart degrades the command path; after 2–3
+                    # fires the command socket is permanently unusable until
+                    # the robot is power-cycled. See ISSUES.md / git history.
+                    # If feedback goes stale we just surface it via _state
+                    # and rely on the driver wrapper's own check_robot loop
+                    # (driver.py) to restart only on real robot unreachability.
                     _state["last_update"] = time.time()
                 except Exception as e:
                     _state["connected"] = False
@@ -1991,6 +1990,33 @@ async def servo_config(req: dict):
         _settings_store.patch("servo", filtered)
         tester = _get_servo_tester()
         return {"success": True, "status": tester.status().__dict__}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# Default tuning values — must match the HTML slider `value=` attributes
+# and the sliders' min/max. Kept here so the Reset button has a single
+# source of truth on the server.
+_SERVO_TUNING_DEFAULTS = {
+    "servo_rate_hz": 30.0,
+    "t": 0.05,
+    "gain": 500.0,
+    "aheadtime": 50.0,
+}
+
+
+@app.get("/api/servo/config")
+async def servo_config_get():
+    """Return persisted servo tuning values (for UI pre-fill on page load)."""
+    try:
+        cfg = _settings_store.get("servo") or {}
+        # Fill in defaults for any missing keys so the UI always has a
+        # complete set of values to populate the sliders with.
+        out = {**_SERVO_TUNING_DEFAULTS}
+        for k in _SERVO_TUNING_DEFAULTS:
+            if k in cfg:
+                out[k] = cfg[k]
+        return {"success": True, "config": out, "defaults": _SERVO_TUNING_DEFAULTS}
     except Exception as e:
         return {"success": False, "error": str(e)}
 

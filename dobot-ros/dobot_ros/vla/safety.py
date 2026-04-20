@@ -55,9 +55,9 @@ class SafetyLimits:
 
         corners = data.get("corners") or data.get("points") or []
         if len(corners) >= 3:
-            xs = [c.get("x", c[0] if isinstance(c, (list, tuple)) else 0) for c in corners]
-            ys = [c.get("y", c[1] if isinstance(c, (list, tuple)) else 0) for c in corners]
-            zs = [c.get("z", c[2] if isinstance(c, (list, tuple)) else 0) for c in corners]
+            xs = [c["x"] if isinstance(c, dict) else c[0] for c in corners]
+            ys = [c["y"] if isinstance(c, dict) else c[1] for c in corners]
+            zs = [c["z"] if isinstance(c, dict) else c[2] for c in corners]
             lims.x_min, lims.x_max = min(xs), max(xs)
             lims.y_min, lims.y_max = min(ys), max(ys)
             # Z_min is the highest corner plus margin (so we never drop the gripper below the table).

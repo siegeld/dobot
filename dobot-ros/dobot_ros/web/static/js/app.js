@@ -1169,17 +1169,9 @@
 
     const byId = id => document.getElementById(id);
 
-    // Tuning sliders — live-update their value display and push config.
-    const tunePush = debounce(async () => {
-      const cfg = {
-        servo_rate_hz: parseFloat(byId('srv-rate').value),
-        t: parseFloat(byId('srv-t').value),
-        gain: parseFloat(byId('srv-gain').value),
-        aheadtime: parseFloat(byId('srv-ahead').value),
-      };
-      try { await servoPost('/api/servo/config', cfg); } catch (e) {}
-    }, 150);
-
+    // Tuning sliders — update only their value label on input.
+    // Persistence is explicit: the Save button POSTs to /api/servo/config;
+    // Reset restores the HTML defaults (and persists on next Save).
     const tuneMap = [
       ['srv-rate', 'srv-rate-val', v => v],
       ['srv-t', 'srv-t-val', v => v],
@@ -1191,9 +1183,73 @@
       if (!el) continue;
       el.addEventListener('input', () => {
         byId(valId).textContent = fmt(el.value);
-        tunePush();
       });
     }
+
+    // Helper to apply a {servo_rate_hz, t, gain, aheadtime} dict to the sliders
+    // and their value labels. Used on load and Reset.
+    const applyTuning = (cfg) => {
+      const fields = [
+        ['srv-rate',  'srv-rate-val',  cfg.servo_rate_hz],
+        ['srv-t',     'srv-t-val',     cfg.t],
+        ['srv-gain',  'srv-gain-val',  cfg.gain],
+        ['srv-ahead', 'srv-ahead-val', cfg.aheadtime],
+      ];
+      for (const [sid, vid, val] of fields) {
+        if (val === undefined || val === null) continue;
+        const el = byId(sid);
+        if (!el) continue;
+        el.value = val;
+        byId(vid).textContent = val;
+      }
+    };
+
+    // Load saved tuning on init so sliders reflect persisted state.
+    (async () => {
+      try {
+        const r = await fetch('/api/servo/config');
+        const j = await r.json();
+        if (j && j.success && j.config) applyTuning(j.config);
+      } catch (e) { /* keep HTML defaults */ }
+    })();
+
+    // Save button — explicit persist.
+    const tuningFeedback = byId('srv-tuning-feedback');
+    const flashTuning = (msg, ok = true) => {
+      if (!tuningFeedback) return;
+      tuningFeedback.textContent = msg;
+      tuningFeedback.className = 'small ' + (ok ? 'text-success' : 'text-danger');
+      setTimeout(() => { if (tuningFeedback.textContent === msg) tuningFeedback.textContent = ''; }, 1800);
+    };
+    byId('btn-srv-save-tuning')?.addEventListener('click', async () => {
+      const cfg = {
+        servo_rate_hz: parseFloat(byId('srv-rate').value),
+        t: parseFloat(byId('srv-t').value),
+        gain: parseFloat(byId('srv-gain').value),
+        aheadtime: parseFloat(byId('srv-ahead').value),
+      };
+      try {
+        const res = await servoPost('/api/servo/config', cfg);
+        flashTuning(res.success ? 'Saved' : `Save failed: ${res.error}`, !!res.success);
+      } catch (e) {
+        flashTuning(`Save failed: ${e.message}`, false);
+      }
+    });
+
+    // Reset button — pull server-side defaults and apply to sliders.
+    // Does not auto-save; user must click Save to persist.
+    byId('btn-srv-reset-tuning')?.addEventListener('click', async () => {
+      try {
+        const r = await fetch('/api/servo/config');
+        const j = await r.json();
+        if (j && j.defaults) {
+          applyTuning(j.defaults);
+          flashTuning('Reset to defaults — click Save to persist');
+        }
+      } catch (e) {
+        flashTuning(`Reset failed: ${e.message}`, false);
+      }
+    });
 
     // Jog sliders — push offset target.
     const jogLabels = ['srv-jog-x-val', 'srv-jog-y-val', 'srv-jog-z-val',
