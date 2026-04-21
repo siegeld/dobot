@@ -57,6 +57,15 @@
 
     sidebar.querySelectorAll('.sidebar-card').forEach(card => {
       card.addEventListener('dragstart', (e) => {
+        // The whole card is draggable (so the drop target visualisation
+        // moves the whole card), but we only want the *header* to be a
+        // drag initiator — otherwise interactive children like the 3D
+        // view's OrbitControls canvas have their pointer events stolen
+        // by the browser's HTML5 DnD machinery and stop responding.
+        if (!e.target.closest('.card-header')) {
+          e.preventDefault();
+          return;
+        }
         dragging = card;
         card.classList.add('dragging');
         // Firefox needs this to start the drag.
