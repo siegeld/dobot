@@ -133,6 +133,16 @@ HTTP / WebSocket reference.
   poses; workspace/velocity/gripper bounds.
 - RLDS dataset builder for drag-teach demo recording.
 
+#### HomeBody research plan (docs only)
+- `HOMEBODY.md` — plan to reproduce Stanford TML's HomeBody
+  (explore → remember → act) on the CR5: a frontier VLM orchestrating a
+  composable skill library grounded in a scene reconstruction built from
+  the arm's own multi-viewpoint scan. Trains no policy, so it is the
+  complement to the VLA track rather than a competitor. Covers the
+  wrist-camera + eye-in-hand prerequisite, the `scene_memory.json`
+  schema, the `Skill`/`SkillResult` contract, the planner loop, and the
+  ablation table (chiefly: memory vs. single static frame).
+
 #### Vision & calibration
 - Calibration tab: table-plane recording, camera-to-robot transform,
   workspace tests with configurable heights, phase indicator walking

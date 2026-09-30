@@ -15,6 +15,7 @@ A professional, production-ready CLI tool for controlling Dobot CR series collab
 > - [API.md](API.md) — HTTP + WebSocket reference for the web dashboard
 > - [CHANGELOG.md](CHANGELOG.md) — user-facing change history
 > - [VLA.md](VLA.md) / [VISION.md](VISION.md) — ML and vision stack
+> - [HOMEBODY.md](HOMEBODY.md) — explore/remember/act research plan (VLM-orchestrated skills)
 
 ## Features
 
