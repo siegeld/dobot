@@ -50,6 +50,16 @@ HTTP / WebSocket reference.
   not, which crashed edited policies on the live server). Real adapter
   proven against a fake ROS client: MovL-only, preflight, confirm, watchdog,
   caps.
+- **`sort_blocks_by_color` policy**: moves every block into a colour zone
+  along the near edge of the table (one zone per colour, blocks in a row).
+  Loops look → pick → place with multi-frame, position-averaged perception,
+  moves blocks that obstruct zones first, sets aside blocks it cannot grasp
+  or place yet and gives up on them with a reason after two tries, and
+  caps iterations. Found while testing it: the simulator now centres a
+  grasped object along the jaw axis as a real parallel gripper does (an
+  off-centre block was being clipped by the opening fingers after release).
+  `place_at` takes an opening width so releases next to neighbours stay
+  clear. New scene `mixed_colors`.
 
 #### Vision pick — safety-gated, tool-aware, strategy-owned motion
 - **Pick-confirm broker** (`dobot_ros/web/pick_confirm.py`) — sync

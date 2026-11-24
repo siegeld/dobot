@@ -1,0 +1,14 @@
+{
+  "name": "mixed_colors",
+  "description": "Eight cubes in three colours, scattered — the sorting scene. Randomize before use.",
+  "objects": [
+    {"label": "block", "color": "red", "size": [40, 40, 40], "position": [-450, -200], "yaw_deg": 10},
+    {"label": "block", "color": "red", "size": [40, 40, 40], "position": [-560, -420], "yaw_deg": -35},
+    {"label": "block", "color": "red", "size": [40, 40, 40], "position": [-380, -60], "yaw_deg": 60},
+    {"label": "block", "color": "blue", "size": [40, 40, 40], "position": [-500, -300], "yaw_deg": 0},
+    {"label": "block", "color": "blue", "size": [40, 40, 40], "position": [-620, -150], "yaw_deg": 45},
+    {"label": "block", "color": "blue", "size": [40, 40, 40], "position": [-430, -520], "yaw_deg": -20},
+    {"label": "block", "color": "green", "size": [40, 40, 40], "position": [-540, -40], "yaw_deg": 30},
+    {"label": "block", "color": "green", "size": [40, 40, 40], "position": [-350, -350], "yaw_deg": -70}
+  ]
+}

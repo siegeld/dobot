@@ -276,6 +276,16 @@ class SimRobot:
         T = self._tip_matrix()
         Tinv = np.linalg.inv(T)
         c = Tinv @ np.array([obj.position[0] / 1000.0, obj.position[1] / 1000.0, obj.position[2] / 1000.0, 1.0])
+        # A parallel gripper centres what it closes on: the first finger to
+        # touch pushes the object until both pads bear. So the object's
+        # offset along the jaw axis (tool X) is zeroed; the offset across
+        # the jaws and along Z is whatever it was.
+        slid = abs(c[0]) * 1000.0
+        c[0] = 0.0
+        world_c = T @ np.array([c[0], c[1], c[2], 1.0])
+        obj.position = [float(world_c[0] * 1000.0), float(world_c[1] * 1000.0), float(world_c[2] * 1000.0)]
+        if slid > 0.5:
+            self.trace.log(f"jaws centred '{obj.id}' (slid {slid:.1f} mm along the jaw axis)")
         self._attach_offset = c[:3]
         self._attach_yaw_offset = obj.yaw_deg - self._jaw_yaw_deg()
         obj.support = "gripper"

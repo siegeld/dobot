@@ -238,11 +238,13 @@ def grasp(robot: Robot, trace: Trace, width_hint_mm: Optional[float] = None,
 
 def place_at(robot: Robot, world: World, trace: Trace, xy: Sequence[float],
              release_height_mm: float, approach_height_mm: float,
-             yaw_deg: Optional[float] = None) -> None:
+             yaw_deg: Optional[float] = None, open_width_mm: float = GRIPPER_STROKE_MM) -> None:
+    """Hover → descend → open to ``open_width_mm`` (just enough to let go
+    when neighbours are close) → lift."""
     trace.call("place_at", xy=list(xy), release_height_mm=release_height_mm,
-               approach_height_mm=approach_height_mm, yaw_deg=yaw_deg)
+               approach_height_mm=approach_height_mm, yaw_deg=yaw_deg, open_width_mm=open_width_mm)
     hover_above(robot, world, trace, xy, approach_height_mm, yaw_deg)
     descend_to(robot, world, trace, release_height_mm)
-    open_gripper(robot, trace)
+    open_gripper(robot, trace, open_width_mm)
     lift(robot, world, trace, approach_height_mm)
     trace.ret("place_at")
