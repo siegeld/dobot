@@ -1282,6 +1282,7 @@ from dobot_ros.strategies import StrategyRegistry
 _strategy_registry = StrategyRegistry()
 
 
+
 @app.get("/api/strategies/list")
 async def strategies_list():
     return {"strategies": _strategy_registry.list_strategies()}
@@ -1848,15 +1849,34 @@ def inverse_kin(req: InverseKinRequest):
     Used by the 3D simulation mode to animate the planned trajectory.
     """
     try:
-        client = _get_client()
         results = []
+        if not _state.get("connected"):
+            # Robot off: answer from the URDF model (dobot_ros.sim.kinematics)
+            # so the 3D Simulate button still works. Seeded from the last
+            # known joints when we have them.
+            from dobot_ros.sim import kinematics as K
+            seed = _state.get("joint") if any(_state.get("joint", [])) else None
+            tool_len = 0.0
+            if int(_state.get("tool_index", 0)) >= 1:
+                try:
+                    tool_len = float((_settings_store.get("tool") or {}).get("tool_length_mm", 203.0))
+                except Exception:
+                    tool_len = 203.0
+            for pose in req.poses:
+                if len(pose) != 6:
+                    return JSONResponse(status_code=400,
+                        content={"success": False, "error": f"each pose must be 6-D, got {len(pose)}"})
+                seed = K.ik(pose, seed_deg=seed, tool_length_mm=tool_len)
+                results.append([round(v, 3) for v in seed])
+            return {"success": True, "joints": results, "source": "model"}
+        client = _get_client()
         for pose in req.poses:
             if len(pose) != 6:
                 return JSONResponse(status_code=400,
                     content={"success": False, "error": f"each pose must be 6-D, got {len(pose)}"})
             joints = client.inverse_kin(pose)
             results.append(joints)
-        return {"success": True, "joints": results}
+        return {"success": True, "joints": results, "source": "controller"}
     except Exception as e:
         logging.exception("inverse-kin failed")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
@@ -2797,3 +2817,23 @@ def start_server(config: Config, host: str = "0.0.0.0", port: int = 8080):
     global _config
     _config = config
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+# ── Hand-coded policies + simulator (dobot_ros.policies / dobot_ros.sim) ──
+# Routes live in web/policies_api.py; it gets our singletons via closures.
+from dobot_ros.web import policies_api as _policies_api  # noqa: E402
+
+_policies_api.register(
+    app,
+    get_client=_get_client,
+    pick_confirm=_pick_confirm,
+    broadcast=lambda payload: _broadcast_ws(payload),
+    acquire_motion=lambda mode: _acquire_motion(mode),
+    release_motion=lambda: _release_motion(),
+    settings_store=_settings_store,
+    get_vision_transform=lambda: _get_vision_transform(),
+    state=_state,
+    camera_url=CAMERA_URL,
+    get_table_z=lambda: _get_table_z(),
+    get_min_clearance=lambda: _get_min_clearance_mm(),
+    table_file=_TABLE_FILE,
+)

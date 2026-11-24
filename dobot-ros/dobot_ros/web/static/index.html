@@ -274,6 +274,11 @@
           </button>
         </li>
         <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-policies-btn" data-bs-toggle="tab" data-bs-target="#tab-policies" type="button" role="tab">
+            <i class="bi bi-code-square"></i> Policies
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-servo-btn" data-bs-toggle="tab" data-bs-target="#tab-servo" type="button" role="tab">
             <i class="bi bi-speedometer2"></i> Servo
           </button>
@@ -790,6 +795,121 @@
         </div>
 
         <!-- ─── VLA Tab ─── -->
+        <!-- ─── Policies Tab ─── -->
+        <div class="tab-pane fade" id="tab-policies" role="tabpanel" aria-labelledby="tab-policies-btn">
+          <div class="row g-2">
+
+            <div class="col-lg-4">
+              <div class="card mb-2">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                  <span><i class="bi bi-code-square"></i> Policy</span>
+                  <button class="btn btn-outline-secondary btn-sm py-0" id="btn-pol-reload" title="Re-import policy modules (picks up edited files without a restart)"><i class="bi bi-arrow-clockwise"></i></button>
+                </div>
+                <div class="card-body py-2">
+                  <select class="form-select form-select-sm mb-1" id="pol-select"></select>
+                  <div class="small text-muted mb-2" id="pol-desc"></div>
+                  <h6 class="section-label">Parameters</h6>
+                  <div id="pol-params"></div>
+                  <button class="btn btn-outline-secondary btn-sm mt-1" id="btn-pol-save-params"><i class="bi bi-save"></i> Save as defaults</button>
+
+                  <h6 class="section-label mt-3">Target</h6>
+                  <div class="d-flex gap-3 mb-2">
+                    <div class="form-check"><input class="form-check-input" type="radio" name="pol-target" id="pol-target-sim" checked><label class="form-check-label" for="pol-target-sim">Simulator</label></div>
+                    <div class="form-check"><input class="form-check-input" type="radio" name="pol-target" id="pol-target-robot"><label class="form-check-label" for="pol-target-robot">Robot</label></div>
+                  </div>
+                  <div id="pol-robot-opts" class="d-none mb-2">
+                    <label class="small text-muted">Confirm mode</label>
+                    <select class="form-select form-select-sm" id="pol-confirm-mode">
+                      <option value="step" selected>step — confirm every motion</option>
+                      <option value="once">once — no per-motion prompts (rehearsal + watchdog still on)</option>
+                    </select>
+                  </div>
+                  <div id="pol-sim-opts">
+                    <div class="d-flex align-items-center gap-2 mb-1">
+                      <label class="small text-muted flex-grow-1">Scene</label>
+                      <select class="form-select form-select-sm w-auto" id="pol-scene"></select>
+                    </div>
+                    <table class="table table-sm table-borderless mb-1" style="font-size:12px">
+                      <thead><tr class="text-muted"><th>object</th><th>X</th><th>Y</th><th>yaw</th><th>size</th></tr></thead>
+                      <tbody id="pol-scene-objects"></tbody>
+                    </table>
+                    <div class="d-flex gap-2 align-items-center mb-2">
+                      <input type="number" class="form-control form-control-sm" id="pol-seed" placeholder="seed" style="width:6em" title="Random seed for positions and perception noise (blank = random)">
+                      <button class="btn btn-outline-secondary btn-sm" id="btn-pol-randomize" title="Place the scene's objects at random reachable positions"><i class="bi bi-shuffle"></i> Randomize</button>
+                      <button class="btn btn-outline-secondary btn-sm" id="btn-pol-save-scene" title="Save the current layout as a new scene"><i class="bi bi-save"></i></button>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 mb-1 small">
+                      <div class="form-check mb-0"><input class="form-check-input" type="checkbox" id="pol-noise-on" checked><label class="form-check-label" for="pol-noise-on">Perception noise</label></div>
+                      <span class="text-muted">xy σ</span><input type="number" class="form-control form-control-sm" id="pol-noise-xy" style="width:4.5em" step="0.5">
+                      <span class="text-muted">yaw σ</span><input type="number" class="form-control form-control-sm" id="pol-noise-yaw" style="width:4.5em" step="0.5">
+                      <span class="text-muted">miss</span><input type="number" class="form-control form-control-sm" id="pol-noise-miss" style="width:4.5em" step="0.01" min="0" max="1">
+                    </div>
+                    <div class="d-flex align-items-center gap-2 small">
+                      <span class="text-muted">Playback</span>
+                      <select class="form-select form-select-sm w-auto" id="pol-pace">
+                        <option value="1">real time</option><option value="2">2×</option><option value="4">4×</option><option value="0">instant</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="d-flex gap-2 mt-3">
+                    <button class="btn btn-primary btn-sm flex-grow-1" id="btn-pol-run"><i class="bi bi-play-fill"></i> Run</button>
+                    <button class="btn btn-danger btn-sm" id="btn-pol-stop" disabled><i class="bi bi-stop-fill"></i> Stop</button>
+                  </div>
+                  <div class="d-flex gap-2 mt-2 align-items-center">
+                    <button class="btn btn-outline-primary btn-sm" id="btn-pol-batch" title="Run N seeded sim episodes with randomized positions and report the success rate"><i class="bi bi-collection-play"></i> Batch</button>
+                    <input type="number" class="form-control form-control-sm" id="pol-batch-n" value="30" min="1" max="500" style="width:5.5em">
+                    <span class="small text-muted">episodes (sim)</span>
+                  </div>
+                  <div id="pol-batch-result" class="mt-2"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-4">
+              <div class="card mb-2">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                  <span><i class="bi bi-activity"></i> Run</span>
+                  <button class="btn btn-outline-secondary btn-sm py-0" id="btn-pol-live" title="Return the 3D view to the live robot"><i class="bi bi-broadcast"></i> Live</button>
+                </div>
+                <div class="card-body py-2">
+                  <div class="small mb-1" id="pol-run-status">Idle</div>
+                  <div class="mb-2" id="pol-result"></div>
+                  <div id="pol-replay" class="d-none mb-2">
+                    <div class="d-flex align-items-center gap-2">
+                      <button class="btn btn-outline-secondary btn-sm py-0" id="btn-pol-replay-play"><i class="bi bi-play-fill"></i></button>
+                      <input type="range" class="form-range flex-grow-1" id="pol-replay-slider" min="0" max="1000" value="0">
+                      <select class="form-select form-select-sm w-auto" id="pol-replay-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
+                    </div>
+                    <div class="small text-muted" id="pol-replay-time"></div>
+                  </div>
+                  <h6 class="section-label">Primitive log</h6>
+                  <div class="activity-log" id="pol-log"></div>
+                  <h6 class="section-label mt-2">Traces</h6>
+                  <div class="list-group list-group-flush" id="pol-traces"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-4">
+              <div class="card mb-2">
+                <div class="card-header"><i class="bi bi-shield-check"></i> Engine fail-safes</div>
+                <div class="card-body py-2" id="pol-safety"><span class="text-muted small">loading…</span></div>
+              </div>
+              <div class="card mb-2">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                  <span><i class="bi bi-filetype-py"></i> Source</span>
+                  <span class="small text-muted" id="pol-source-path"></span>
+                </div>
+                <div class="card-body p-1">
+                  <pre id="pol-source" class="mb-0"></pre>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
         <div class="tab-pane fade" id="tab-vla" role="tabpanel" aria-labelledby="tab-vla-btn">
           <div class="card mb-2">
             <div class="card-header"><i class="bi bi-robot"></i> Vision-Language-Action</div>
@@ -1192,9 +1312,11 @@
 <script src="/static/js/app-settings.js"></script>
 <script src="/static/js/app-calibration.js"></script>
 <script src="/static/js/app-vision.js"></script>
+<script src="/static/js/app-policies.js"></script>
 <script src="/static/js/app-sidebar.js"></script>
 <script src="/static/js/app-misc.js"></script>
 <script type="module" src="/static/js/robot3d.js"></script>
+<script src="/static/js/policy3d.js"></script>
 
 </body>
 </html>

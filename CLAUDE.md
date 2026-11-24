@@ -135,3 +135,35 @@ The mode values from the feedback port (used in the web dashboard):
 - Root-owned `__pycache__` can appear in `dobot-ros/` from Docker runs — `.dockerignore` excludes them from builds, but may need `sudo rm -rf` if they cause permission issues
 - `dobot_ros_config.yaml` was historically created as a directory by root — should be a file (or absent)
 - The `check_connection` timeout uses `service_timeout` from config (default 5s) — UDP discovery between containers can take a few seconds on first call
+
+## Hand-coded policies + simulator
+
+Third control track beside vision picking and VLA — see **POLICIES.md** for the design.
+
+- **Policies** are Python task programs in `dobot-ros/dobot_ros/policies/<slug>.py`
+  (class attrs `name/slug/description`, `parameter_defs()`, `run(robot, world, params, trace)`).
+  They talk only to the `Robot` / `World` protocols (`policies/types.py`) through the
+  primitives in `policies/primitives.py`, so the same file runs on the simulator
+  (`dobot_ros/sim/`) and the arm (`dobot_ros/real/`). Discovery is automatic (volume-mounted;
+  `POST /api/policies/reload` re-imports). Params JSON lives in `policies/params/`.
+- **Simulator** is kinematic, no physics: `sim/kinematics.py` (CR5 FK/IK from the URDF;
+  Dobot Euler convention assumed R = Rz·Ry·Rx — **run `scripts/validate_fk.py` with the robot
+  on before trusting RZ**), `sim/world.py` (table from `table_plane.json`, objects, seeded
+  perception noise), `sim/robot.py` (interpolated moves, geometric grasp rule, attached objects).
+  Scenes are JSON in `sim/scenes/`.
+- **Engine fail-safes** (`policies/guards.py`, enforced identically by both backends, not
+  by policies): floor clearance, workspace bounds, ±15° tilt envelope, 700 mm per-move cap,
+  speed ≤ 50 / force ≤ 60, model path preflight of every sample, MovL only (never cartesian
+  MovJ), step-confirm modal, a 10 Hz watchdog that Stops on live floor/workspace/ERROR/
+  COLLISION, and a **sim rehearsal** of the policy against the live scene that must not hit a
+  guard before the first real motion (`runner.PolicyRunner._rehearse`). Robot runs also hold
+  the server motion lock (`_acquire_motion("policy")`).
+- **Web**: Policies tab (`web/static/js/app-policies.js`, 3D layer `policy3d.js`, routes in
+  `web/policies_api.py`). Sim/robot target, scene editor + randomize, live primitive log with
+  source-line highlight, trace replay with scrubber, seeded batch success rate. Traces are
+  JSON in `policies/traces/` (gitignored). `/api/inverse-kin` falls back to the model when the
+  robot is off, so the Vision "Simulate" button works unpowered.
+- **CLI**: `dobot-ros policy list|scenes|run|batch` (sim in-process; `--robot` goes through the
+  web API so the confirm modal and motion lock apply).
+- **Tests**: `tests/sim/`, `tests/policies/` — run in the container:
+  `docker compose run --rm --no-deps -T -v $PWD/tests:/tests:ro -e PYTHONPATH=/dobot-ros dobot bash -lc 'cd / && python3 -m pytest /tests/sim /tests/policies -q -p no:cacheprovider'`

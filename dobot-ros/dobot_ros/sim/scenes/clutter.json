@@ -1,0 +1,12 @@
+{
+  "name": "clutter",
+  "description": "Six blocks, mixed colors and sizes, randomize before use.",
+  "objects": [
+    {"label": "block", "color": "red", "size": [40, 40, 40], "position": [-450, -200]},
+    {"label": "block", "color": "blue", "size": [40, 40, 40], "position": [-550, -300]},
+    {"label": "block", "color": "green", "size": [60, 30, 30], "position": [-350, -400]},
+    {"label": "block", "color": "yellow", "size": [30, 30, 60], "position": [-500, -500]},
+    {"label": "block", "color": "orange", "size": [50, 50, 20], "position": [-600, -100]},
+    {"label": "block", "color": "purple", "size": [45, 25, 45], "position": [-400, -600]}
+  ]
+}

@@ -28,6 +28,7 @@ from dobot_msgs_v4.srv import (
     ClearError,
     InverseKin,
     MovJ,
+    MovL,
     RelMovLUser,
     RelMovLTool,
     ServoP,
@@ -116,6 +117,8 @@ class DobotRosClient(Node):
             ClearError, f'{self._srv_prefix}ClearError')
         self._movj_client = self.create_client(
             MovJ, f'{self._srv_prefix}MovJ')
+        self._movl_client = self.create_client(
+            MovL, f'{self._srv_prefix}MovL')
         self._rel_mov_user_client = self.create_client(
             RelMovLUser, f'{self._srv_prefix}RelMovLUser')
         self._rel_mov_tool_client = self.create_client(
@@ -467,6 +470,27 @@ class DobotRosClient(Node):
         request.f = float(pose[5])
         request.param_value = []
         response = self._call_service(self._movj_client, request)
+        return response.res
+
+    def move_line(self, pose: List[float]) -> int:
+        """Move to cartesian pose [X, Y, Z, RX, RY, RZ] using MovL — a
+        straight-line tool path. Unlike MovJ (joint interpolation) the tool
+        never leaves the segment between start and goal, so a goal that
+        passes the floor/workspace guards implies a path that does too."""
+        if len(pose) != 6:
+            raise ValueError("Must provide [X, Y, Z, RX, RY, RZ]")
+        self._validate_finite(pose, "MovL pose")
+        self._validate_pose_bounds(pose)
+        request = MovL.Request()
+        request.mode = False  # Cartesian mode
+        request.a = float(pose[0])
+        request.b = float(pose[1])
+        request.c = float(pose[2])
+        request.d = float(pose[3])
+        request.e = float(pose[4])
+        request.f = float(pose[5])
+        request.param_value = []
+        response = self._call_service(self._movl_client, request)
         return response.res
 
     def move_joints(self, angles: List[float], wait: bool = False, tolerance: float = 0.5) -> int:

@@ -111,6 +111,11 @@
       try {
         const data = JSON.parse(evt.data);
         // The state push has no `type` field. Confirm-broker messages do.
+        if (data && data.type) {
+          // Let feature tabs (policies, …) observe typed messages.
+          document.dispatchEvent(new CustomEvent('dobot-ws', { detail: data }));
+          if (data.type.startsWith('policy_')) return;
+        }
         if (data && data.type === 'pick_confirm') {
           if (typeof window.handlePickConfirm === 'function') {
             window.handlePickConfirm(data);

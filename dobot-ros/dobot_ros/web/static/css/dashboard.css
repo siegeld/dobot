@@ -346,3 +346,18 @@ kbd {
   .card-body { padding: 0.5rem; }
   .jog-btn { width: 2.5rem; }
 }
+
+/* ── Policies tab ─────────────────────────────────────────── */
+#pol-source {
+  max-height: 420px; overflow: auto; font-size: 11px; line-height: 1.35;
+  background: var(--db-bg, #0d1117); color: var(--db-text, #c9d1d9);
+  padding: 6px 8px; border-radius: 4px; margin: 0;
+}
+.pol-src-line { display: block; white-space: pre; }
+.pol-src-line.active { background: rgba(88, 166, 255, 0.22); }
+#pol-log { max-height: 260px; overflow: auto; font-size: 11.5px; }
+#pol-log .pol-ev.active .log-msg { color: var(--db-accent, #58a6ff); font-weight: 600; }
+.pol-ev-log .log-msg { color: var(--db-muted, #8b949e); font-style: italic; }
+.pol-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+#pol-scene-objects input { width: 5.2em; display: inline-block; }
+#pol-traces { max-height: 180px; overflow: auto; }

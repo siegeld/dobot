@@ -1014,6 +1014,107 @@ def vla_execute(
         client.shutdown()
 
 
+@cli.group()
+def policy():
+    """Hand-coded policies: run them on the simulator or (via the web
+    server) on the robot. See POLICIES.md."""
+    pass
+
+
+def _policy_runner():
+    from pathlib import Path
+    from dobot_ros.policies.registry import PolicyRegistry
+    from dobot_ros.policies.runner import PolicyRunner
+    traces = Path(__file__).resolve().parent / "policies" / "traces"
+    return PolicyRunner(PolicyRegistry(), traces)
+
+
+@policy.command("list")
+def policy_list() -> None:
+    """List available policies and their parameters."""
+    for meta in _policy_runner().registry.list_policies():
+        click.echo(f"{meta['slug']:24s} {meta['name']} — {meta['description'][:70]}")
+        for prm in meta["parameters"]:
+            cur = meta["current_params"].get(prm["name"])
+            click.echo(f"    {prm['name']:18s} = {cur!r:10} {prm['description']}")
+
+
+@policy.command("scenes")
+def policy_scenes() -> None:
+    """List simulator scenes."""
+    from dobot_ros.sim.scene import list_scenes
+    for sc in list_scenes():
+        click.echo(f"{sc['name']:16s} {sc['object_count']} objects  {sc['description']}")
+
+
+@policy.command("run")
+@click.argument("slug")
+@click.option("--sim/--robot", default=True, help="Target (default: simulator)")
+@click.option("--scene", default="two_blocks", help="Sim scene name")
+@click.option("--seed", type=int, default=None)
+@click.option("--random", "random_positions", is_flag=True, help="Randomize object positions")
+@click.option("--no-noise", is_flag=True, help="Perfect perception")
+@click.option("--pace", type=float, default=0.0, help="Sim realtime factor (0 = fast)")
+@click.option("-p", "--param", "params", multiple=True, help="key=value override (repeatable)")
+@click.option("--url", default="http://localhost:7070", help="Web server for --robot runs")
+@click.option("--confirm-mode", default="step", type=click.Choice(["step", "once"]))
+def policy_run(slug, sim, scene, seed, random_positions, no_noise, pace, params, url, confirm_mode) -> None:
+    """Run a policy once and print its trace."""
+    overrides = {}
+    for kv in params:
+        k, _, v = kv.partition("=")
+        overrides[k] = v
+    if not sim:
+        # Real-robot runs go through the web server so the confirm modal,
+        # motion lock and guards are the same ones the dashboard uses.
+        import requests
+        r = requests.post(f"{url}/api/policies/run", json={
+            "slug": slug, "target": "robot", "params": overrides, "confirm_mode": confirm_mode}, timeout=10)
+        click.echo(r.json())
+        return
+    from dobot_ros.policies.runner import RunRequest
+    runner = _policy_runner()
+    noise = {"enabled": False} if no_noise else None
+
+    def on_event(run_id, ev):
+        k = ev["kind"]
+        if k == "call":
+            print_info(f"→ {ev['name']} {ev.get('args', '')}")
+        elif k == "return" and ev.get("result") is not None:
+            click.echo(f"   ← {ev['result']}")
+        elif k in ("log", "error"):
+            click.echo(f"   {k}: {ev.get('message')}")
+
+    rec = runner.run(RunRequest(slug=slug, target="sim", params=overrides, scene=scene, seed=seed,
+                                random_positions=random_positions, noise=noise, pace=pace),
+                     on_event=on_event)
+    res = rec["result"]
+    (print_success if res["ok"] else print_error)(f"{slug}: {res}")
+    click.echo(f"trace {rec['id']} ({len(rec['events'])} events)")
+
+
+@policy.command("batch")
+@click.argument("slug")
+@click.option("--n", default=50, type=int)
+@click.option("--scene", default="clutter")
+@click.option("--seed", default=0, type=int)
+@click.option("--no-noise", is_flag=True)
+@click.option("-p", "--param", "params", multiple=True, help="key=value override (repeatable)")
+def policy_batch(slug, n, scene, seed, no_noise, params) -> None:
+    """Run N seeded sim episodes and report the success rate."""
+    from dobot_ros.policies.runner import RunRequest
+    overrides = dict(kv.partition("=")[::2] for kv in params)
+    s = _policy_runner().batch(RunRequest(slug=slug, params=overrides, scene=scene, seed=seed,
+                                          noise={"enabled": False} if no_noise else None), n=n)
+    click.echo(f"{s['ok']}/{s['n']} ok  success_rate={s['success_rate']}  "
+               f"mean_attempts={s['mean_attempts']}  wall={s['wall_s']}s")
+    for reason, count in sorted(s["reasons"].items(), key=lambda kv: -kv[1]):
+        click.echo(f"  {count:3d}  {reason}")
+    fails = [r for r in s["runs"] if not r["ok"]]
+    if fails:
+        click.echo("failing seeds: " + ", ".join(str(r["seed"]) for r in fails))
+
+
 @cli.command()
 @click.option("--host", default="0.0.0.0", help="Host to bind to")
 @click.option("--port", "-p", default=8080, type=int, help="Port to serve on")

@@ -73,3 +73,6 @@ dobot-ros/dobot_ros/web/settings/table_plane_for_tester.json
 
 # pytest cache
 .pytest_cache/
+
+# Policy run traces (per-run JSON, regenerated constantly)
+dobot-ros/dobot_ros/policies/traces/*.json

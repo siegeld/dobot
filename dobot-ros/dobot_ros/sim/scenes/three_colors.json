@@ -1,0 +1,9 @@
+{
+  "name": "three_colors",
+  "description": "Red, green and blue blocks of different shapes.",
+  "objects": [
+    {"id": "red_block", "label": "block", "color": "red", "size": [60, 30, 30], "position": [-520, -150], "yaw_deg": 40},
+    {"id": "green_block", "label": "block", "color": "green", "size": [40, 40, 40], "position": [-420, -350], "yaw_deg": 0},
+    {"id": "blue_block", "label": "block", "color": "blue", "size": [50, 25, 50], "position": [-560, -480], "yaw_deg": -60}
+  ]
+}

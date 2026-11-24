@@ -47,6 +47,7 @@ let gripperCurrentSpread = 0;
 
 // Simulation state
 let simulating = false;
+let externalDrive = false;  // policy sim/replay owns the robot pose
 let simSteps = [];
 let simIndex = 0;
 let simStartTime = 0;
@@ -203,6 +204,7 @@ function loadRobot() {
 
 function updateJoints(anglesDeg) {
   if (!anglesDeg || anglesDeg.length < 6) return;
+  if (externalDrive) return;
   // During simulation the live feed drives the ghost, not the main robot.
   if (simulating) {
     simLiveFrozenJoints = anglesDeg.slice();
@@ -232,6 +234,7 @@ function updateGripperPosition(pos01) {
 
 function updateGripper(pos0to1000) {
   // From WebSocket gripper_position (0-1000).
+  if (externalDrive) return;
   if (simulating) {
     simLiveFrozenGripper = pos0to1000;
     return;
@@ -540,3 +543,21 @@ window.resetRobotCamera = resetCamera;
 window.saveRobotCamera = saveCamera;
 window.simulateRobotMotion = startSimulation;
 window.stopRobotSimulation = stopSimulation;
+
+// Hooks for the policy simulator / trace replay layer (policy3d.js).
+window.robot3d = {
+  THREE,
+  getRobotRoot: () => robotRoot,
+  setJointsDirect,
+  updateGripperPosition,
+  setExternalDrive: (on) => { externalDrive = !!on; },
+  isExternalDrive: () => externalDrive,
+  // Aim the orbit camera at a point given in the robot's Z-up frame (metres).
+  frame: (x, y, z, distance = 1.1) => {
+    if (!controls || !camera) return;
+    const target = new THREE.Vector3(x, y, z).applyAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+    controls.target.copy(target);
+    camera.position.set(target.x + distance * 0.55, target.y + distance * 0.75, target.z + distance * 0.7);
+    controls.update();
+  },
+};

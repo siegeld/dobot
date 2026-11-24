@@ -12,6 +12,34 @@ HTTP / WebSocket reference.
 
 ### Added
 
+#### Hand-coded policies + kinematic simulator (POLICIES.md)
+- **Policy track** (`dobot_ros/policies/`): task programs written in Python
+  against two narrow protocols, `Robot` and `World`, composed from a
+  primitive library (`look`, `hover_above`, `descend_to`, `grasp` with
+  jaw-position verification, `lift`, `place_at`). First policies:
+  `pick_colored_block`, `stack_colored_blocks`. Registry + params JSON
+  mirror the strategy system; `Trace` records every call with the policy
+  source line that issued it.
+- **Simulator** (`dobot_ros/sim/`): CR5 FK/IK from the vendor URDF
+  (numeric DLS IK, ~10 ms), table + objects from `table_plane.json` and
+  JSON scenes, seeded perception noise matching the D555's behaviour,
+  cartesian/joint interpolation, geometric grasp rule with attached
+  objects, stacking, collision. Runs headless in pytest in milliseconds.
+- **Engine fail-safes** (`policies/guards.py`), enforced by both backends:
+  floor clearance, workspace bounds, ±15° tilt envelope, 700 mm per-move
+  cap, speed/force caps, model path preflight of every sample, MovL-only
+  cartesian moves (new `DobotRosClient.move_line`), step-confirm modal,
+  10 Hz watchdog that Stops on live floor/workspace/ERROR/COLLISION, and a
+  sim **rehearsal** against the live scene that refuses the real run if
+  the policy would hit a guard.
+- **Web Policies tab**: Sim/Robot target, scene editor + seeded randomize,
+  live primitive log + source highlight, 3D scene objects and trace
+  replay with scrubber (`policy3d.js`), batch success rate. API under
+  `/api/policies/*` and `/api/sim/*`; `/api/inverse-kin` now falls back to
+  the model when the robot is off.
+- **CLI** `dobot-ros policy list|scenes|run|batch`; `scripts/validate_fk.py`
+  fits the Euler convention / flange yaw against the live arm.
+
 #### Vision pick — safety-gated, tool-aware, strategy-owned motion
 - **Pick-confirm broker** (`dobot_ros/web/pick_confirm.py`) — sync
   `ask()` call that blocks the pick thread on a `threading.Event` while

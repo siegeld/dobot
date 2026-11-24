@@ -93,6 +93,35 @@ Gripper state is also pushed over the `/ws/state` stream at 5 Hz.
 | POST | `/api/pick/confirm` | `{id, choice}` | Browser replies to a pending `pick_confirm` modal. Idempotent: replying to an unknown or already-resolved id returns `success: false` without error (another browser may have answered first) |
 | POST | `/api/inverse-kin` | `{poses: [[6]…]}` | Batch IK for simulation rendering |
 
+## Policies & simulator
+
+Hand-coded policies (`dobot_ros/policies/`) run on the kinematic simulator or
+the robot. Routes live in `web/policies_api.py`. See `POLICIES.md`.
+
+| Method | Path | Body | Purpose |
+|---|---|---|---|
+| GET | `/api/policies/list` | — | Policies with parameter defs + current params, and runner status |
+| POST | `/api/policies/reload` | — | Re-import policy modules (edited files, no restart) |
+| GET/POST | `/api/policies/{slug}/params` | `{name: value}` | Read / validate+persist a policy's params |
+| GET | `/api/policies/{slug}/source` | — | Policy source text + path (read-only view) |
+| GET | `/api/policies/safety` | — | Engine fail-safe limits as they apply now (floor, workspace, tilt, caps) |
+| POST | `/api/policies/run` | `{slug, target: sim\|robot, params?, scene?, seed?, random_positions?, noise?, pace?, confirm_mode?}` | Start a run (background). Robot target needs connection, takes the motion lock, rehearses in sim first, confirms each motion in `step` mode. 409 if busy |
+| POST | `/api/policies/batch` | `{slug, n, params?, scene?, seed?, noise?}` | N seeded sim episodes with randomized positions → success rate |
+| POST | `/api/policies/stop` | — | Stop the active run (sim or robot; also cancels pending confirms) |
+| GET | `/api/policies/status` | — | Running? current run / last result |
+| GET | `/api/policies/traces` | `?limit` | Recent run records (+ batch summaries) |
+| GET/DELETE | `/api/policies/traces/{id}` | — | Full trace record (events with joints/pose/gripper/objects) |
+| GET | `/api/sim/scenes` | — | Scene presets + noise defaults |
+| GET/DELETE | `/api/sim/scenes/{name}` | — | Scene JSON + placed objects + table info |
+| POST | `/api/sim/scenes` | `{name, scene}` | Save a scene |
+| POST | `/api/sim/scenes/randomize` | `{scene, seed?}` | Random reachable non-overlapping placement |
+| GET | `/api/sim/table` | — | table_z, surface_z, tool length, clearance, workspace |
+| POST | `/api/sim/ik` | `{poses[], seed?, tool_length_mm?}` | Offline IK from the URDF model |
+| POST | `/api/sim/fk` | `{joints[6], tool_length_mm?}` | Offline FK |
+
+WebSocket `/ws/state` additionally carries `policy_event` (`{run_id, target, slug, event}`),
+`policy_done`, `policy_batch` (progress) and `policy_batch_done`.
+
 ## VLA (Vision-Language-Action)
 
 | Method | Path | Body | Purpose |

@@ -1,0 +1,8 @@
+{
+  "name": "two_blocks",
+  "description": "A red and a blue 40 mm cube on the table.",
+  "objects": [
+    {"id": "red_block", "label": "block", "color": "red", "size": [40, 40, 40], "position": [-480, -250], "yaw_deg": 15},
+    {"id": "blue_block", "label": "block", "color": "blue", "size": [40, 40, 40], "position": [-400, -450], "yaw_deg": -30}
+  ]
+}
