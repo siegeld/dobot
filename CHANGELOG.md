@@ -60,6 +60,14 @@ HTTP / WebSocket reference.
   off-centre block was being clipped by the opening fingers after release).
   `place_at` takes an opening width so releases next to neighbours stay
   clear. New scene `mixed_colors`.
+- **`stack_all_blocks` policy**: one tower from every block. Largest
+  footprint is the base and stays put if the fingers can release onto it
+  clear of neighbours (a block too flat to grip still makes a fine base);
+  otherwise the next clear block is used or the largest is moved to a clear
+  site first. Rest go on largest-first; carry height follows the tower and
+  travel between pile and tower is at carry height; each placement is
+  verified by re-observing the block, a fallen block is retried twice.
+  `site_clear` / `boxes_clear` moved into primitives for both policies.
 
 #### Vision pick — safety-gated, tool-aware, strategy-owned motion
 - **Pick-confirm broker** (`dobot_ros/web/pick_confirm.py`) — sync

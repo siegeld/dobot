@@ -151,6 +151,46 @@ def choose_grasp(obj: WorldObject, others: List[WorldObject], open_margin_mm: fl
     return yaw, opening, clear
 
 
+def boxes_clear(center: Sequence[float], dims: Sequence[float], o: WorldObject, margin_mm: float) -> bool:
+    """Axis-aligned box (dims = extent along X, Y) at ``center`` vs object
+    ``o``'s yawed footprint: clear if neither box's corners/centre come
+    within ``margin_mm`` of the other."""
+    hx, hy = dims[0] / 2.0, dims[1] / 2.0
+    pts = [(center[0] + sx * hx, center[1] + sy * hy) for sx in (-1, 0, 1) for sy in (-1, 0, 1)]
+    if any(_rect_clearance(x, y, o) < margin_mm for x, y in pts):
+        return False
+    d = math.radians(o.yaw_deg)
+    c, sn = math.cos(d), math.sin(d)
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            lx, ly = sx * o.size[0] / 2.0, sy * o.size[1] / 2.0
+            px = o.position[0] + lx * c - ly * sn
+            py = o.position[1] + lx * sn + ly * c
+            ex, ey = abs(px - center[0]) - hx, abs(py - center[1]) - hy
+            if (math.hypot(ex, ey) if ex > 0 and ey > 0 else max(ex, ey)) < margin_mm:
+                return False
+    return True
+
+
+def site_clear(center: Sequence[float], dims: Sequence[float], objects: List[WorldObject],
+               opening_mm: float, margin_mm: float, exclude: Sequence[str] = (),
+               jaw_yaw_deg: float = 90.0, finger_w_mm: float = FINGER_W_MM) -> bool:
+    """Can a block of ``dims`` be released at ``center`` with the jaws open
+    ``opening_mm`` along ``jaw_yaw_deg`` without the block or the finger
+    pads touching any object not in ``exclude``?"""
+    ux, uy = math.cos(math.radians(jaw_yaw_deg)), math.sin(math.radians(jaw_yaw_deg))
+    half = opening_mm / 2.0 + finger_w_mm / 2.0
+    for o in objects:
+        if o.id in exclude or o.support == "gripper":
+            continue
+        if not boxes_clear(center, dims, o, margin_mm):
+            return False
+        for sgn in (-1.0, 1.0):
+            if _rect_clearance(center[0] + sgn * half * ux, center[1] + sgn * half * uy, o) < finger_w_mm / 2.0 + 2.0 + margin_mm:
+                return False
+    return True
+
+
 def grasp_height(obj: WorldObject, world: World, robot: Robot, wanted_mm: float,
                  top_margin_mm: float = 5.0, height_tolerance_mm: float = 15.0) -> float:
     """Fingertip height above the table for the close.

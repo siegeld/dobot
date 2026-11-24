@@ -61,7 +61,7 @@ class Zone:
             for o in objects:
                 if o.id == carried.id:
                     continue
-                if not _boxes_clear(s, carried_dims, o, margin_mm):
+                if not P.boxes_clear(s, carried_dims, o, margin_mm):
                     ok = False; break
                 for sgn in (-1.0, 1.0):
                     pad = (s[0], s[1] + sgn * (opening_mm / 2.0 + finger_w_mm / 2.0))
@@ -72,28 +72,6 @@ class Zone:
             if ok:
                 return s
         return None
-
-
-def _boxes_clear(center: Sequence[float], dims: Sequence[float], o: WorldObject, margin_mm: float) -> bool:
-    """Axis-aligned box (dims = extent along X, Y) at ``center`` vs object
-    ``o``'s yawed footprint: clear if neither box's corners/centre come
-    within ``margin_mm`` of the other."""
-    hx, hy = dims[0] / 2.0, dims[1] / 2.0
-    pts = [(center[0] + sx * hx, center[1] + sy * hy) for sx in (-1, 0, 1) for sy in (-1, 0, 1)]
-    if any(P._rect_clearance(x, y, o) < margin_mm for x, y in pts):
-        return False
-    # and o's corners against our box
-    d = math.radians(o.yaw_deg)
-    c, sn = math.cos(d), math.sin(d)
-    for sx in (-1, 1):
-        for sy in (-1, 1):
-            lx, ly = sx * o.size[0] / 2.0, sy * o.size[1] / 2.0
-            px = o.position[0] + lx * c - ly * sn
-            py = o.position[1] + lx * sn + ly * c
-            ex, ey = abs(px - center[0]) - hx, abs(py - center[1]) - hy
-            if (math.hypot(ex, ey) if ex > 0 and ey > 0 else max(ex, ey)) < margin_mm:
-                return False
-    return True
 
 
 class SortBlocksByColor(Policy):
