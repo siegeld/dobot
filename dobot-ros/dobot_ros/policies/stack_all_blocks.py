@@ -141,11 +141,15 @@ class StackAllBlocks(Policy):
                     hopeless[obj.id] = why
                 continue
             moves += 1
-            # Verify: the block should now sit on the tower.
+            # Verify: the block should now sit in the tower column and off the
+            # table. (Exact height is not required — perceived heights are the
+            # noisiest thing the camera gives us.)
             try:
                 placed = P.look_avg(world, trace, n=n, id=obj.id)
+                # "Off the table" relative to the base's own top, so a flat base
+                # (20 mm) does not make every correct placement look fallen.
                 on_tower = (math.dist(placed.xy, base.xy) < max(base.size[:2]) / 2.0
-                            and placed.bottom_z - surface > top - 15.0)
+                            and placed.bottom_z - surface > (base.top_z - surface) - 12.0)
             except NotFound:
                 on_tower = True  # cannot see it (occluded by the arm) — trust the place
             if on_tower:
@@ -175,10 +179,15 @@ class StackAllBlocks(Policy):
     # ── helpers ─────────────────────────────────────────────────────
     @staticmethod
     def _tower_top(objs: List[WorldObject], tower_ids: List[str], base: WorldObject, surface: float) -> float:
-        """Height of the tower's top above the table, from the highest
-        observed tower block (falls back to the base's own top)."""
-        tops = [o.top_z - surface for o in objs if o.id in tower_ids]
-        return max(tops) if tops else base.top_z - surface
+        """Height of the tower's top above the table: the observed top of the
+        block placed last. (Not the max over every tower block — the max of
+        several noisy readings is biased high, which once made the policy
+        think a correctly placed block had fallen off.)"""
+        by_id = {o.id: o for o in objs}
+        for tid in reversed(tower_ids):
+            if tid in by_id:
+                return by_id[tid].top_z - surface
+        return base.top_z - surface
 
     @staticmethod
     def _find_clear_site(world, robot, objs: List[WorldObject], block: WorldObject, margin: float):

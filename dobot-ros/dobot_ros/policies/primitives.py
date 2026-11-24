@@ -203,12 +203,14 @@ def grasp_height(obj: WorldObject, world: World, robot: Robot, wanted_mm: float,
     floor; a miss there is reported with ``explain_miss``.
     """
     surface = world.table_z - robot.tool_length_mm
+    bottom = obj.bottom_z - surface          # 0 for a block on the table, >0 on a stack
     top = obj.top_z - surface
     floor = world.min_clearance_mm
     if top < floor - height_tolerance_mm:
         raise GraspInfeasible(f"{obj.color} {obj.label} top is only {top:.0f} mm above the table; the "
                               f"{floor:.0f} mm clearance floor leaves nothing to grip")
-    return min(max(wanted_mm, floor), max(top - top_margin_mm, floor))
+    # ``wanted`` is measured from the object's own bottom; the floor is absolute.
+    return min(max(bottom + wanted_mm, floor), max(top - top_margin_mm, floor))
 
 
 def explain_miss(obj: WorldObject, world: World, robot: Robot, grasp_h: float) -> str:
