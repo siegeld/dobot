@@ -217,6 +217,11 @@ class RealRobot:
                 time.sleep(0.05)
             if self._tripped:
                 raise SafetyStop(self._tripped)
+            # Final live check, independent of watchdog timing.
+            final = self.pose()
+            if final[2] < self.guards.min_pose_z(tool) - self._floor_slack:
+                self.client.stop()
+                raise SafetyStop(f"arrived below the floor: Z={final[2]:.1f}")
         finally:
             wd_stop.set()
             wd.join(timeout=1.0)

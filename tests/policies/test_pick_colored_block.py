@@ -81,3 +81,14 @@ def test_stack_policy_batch(runner):
     s = runner.batch(RunRequest(slug="stack_colored_blocks", scene="three_colors", seed=10, pace=0.0,
                                 params={"top_color": "green", "base_color": "blue"}), n=20)
     assert s["success_rate"] >= 0.85, s["reasons"]
+
+
+def test_reload_picks_up_primitives(tmp_path):
+    """Regression: reload() must refresh primitives too, or an edited policy
+    that uses a new primitive crashes with AttributeError on the live server."""
+    reg = PolicyRegistry(params_dir=tmp_path)
+    import sys
+    sys.modules["dobot_ros.policies.primitives"].__dict__.pop("look_avg", None)
+    reg.reload()
+    from dobot_ros.policies import primitives as P
+    assert hasattr(P, "look_avg") and "pick_colored_block" in reg.slugs()

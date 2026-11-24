@@ -22,6 +22,7 @@ from dobot_ros.sim import kinematics as K
 from dobot_ros.sim.world import SimWorld, _footprint_contains
 
 GRIPPER_STROKE_MM = 105.0
+FINGER_W = 10.0                 # finger pad thickness along the jaw axis (mm)
 MAX_TCP_SPEED_MM_S = 1000.0     # at speed factor 100
 MAX_ROT_SPEED_DEG_S = 180.0
 MAX_JOINT_SPEED_DEG_S = 180.0
@@ -222,18 +223,18 @@ class SimRobot:
             c = T @ np.array([*self._attach_offset, 1.0])
             self._attached.position = [float(c[0] * 1000.0), float(c[1] * 1000.0), float(c[2] * 1000.0)]
             self._attached.yaw_deg = self._jaw_yaw_deg() + self._attach_yaw_offset
-        jaw_w = self._jaw_pos / 1000.0 * GRIPPER_STROKE_MM
-        jaw_yaw = self._jaw_yaw_deg()
         for o in self.world.truth():
             if o is self._attached or o.support == "gripper":
                 continue
-            if _footprint_contains(o, tip[0], tip[1], -2.0) and tip[2] < o.top_z - 1.0:
-                # Fingertip inside the object's volume: fine only if the jaws
-                # straddle it (open wider than it is along the jaw axis).
-                if jaw_w < o.width_across(jaw_yaw) + 2.0:
-                    exc = Collision(f"fingertip hit {o.color} {o.label} '{o.id}' at "
-                                    f"Z={tip[2]:.0f} (top {o.top_z:.0f}); jaws {jaw_w:.0f} mm "
-                                    f"< object {o.width_across(jaw_yaw):.0f} mm")
+            # Each finger is a FINGER_W-wide pad centred FINGER_OFFSET from the
+            # tool axis along the jaw direction. A finger inside a free
+            # object's volume is a crash — including the target itself when
+            # the jaws are narrower than it (descending onto it).
+            for fx, fy in self._finger_points_mm():
+                if _footprint_contains(o, fx, fy, FINGER_W / 2.0 - 1.0) and tip[2] < o.top_z - 1.0:
+                    exc = Collision(f"finger hit {o.color} {o.label} '{o.id}' at Z={tip[2]:.0f} "
+                                    f"(top {o.top_z:.0f}); jaw opening {self._jaw_pos / 10:.0f}% "
+                                    f"at yaw {self._jaw_yaw_deg():.0f}°")
                     self.trace.error("move", exc, joints=list(self._joints), pose=self.pose())
                     raise exc
             if self._attached is not None and _footprint_contains(o, *self._attached.position[:2], 0.0):
@@ -241,6 +242,16 @@ class SimRobot:
                     exc = Collision(f"carried object '{self._attached.id}' hit '{o.id}'")
                     self.trace.error("move", exc, joints=list(self._joints), pose=self.pose())
                     raise exc
+
+    def _finger_points_mm(self):
+        """World XY of the two finger pads at the current jaw opening."""
+        T = self._tip_matrix()
+        half = self._jaw_pos / 1000.0 * GRIPPER_STROKE_MM / 2.0 + FINGER_W / 2.0
+        out = []
+        for sgn in (-1.0, 1.0):
+            c = T @ np.array([sgn * half / 1000.0, 0.0, 0.0, 1.0])
+            out.append((float(c[0] * 1000.0), float(c[1] * 1000.0)))
+        return out
 
     def _object_between_fingers(self, w_open: float, w_target: float):
         tip = self._tip_xyz_mm()

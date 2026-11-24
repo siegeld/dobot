@@ -34,36 +34,44 @@ class PickColoredBlock(Policy):
             ParameterDef("force", "int", 20, "Gripper force", 20, 100, 5, unit="%"),
             ParameterDef("max_attempts", "int", 3, "Grasp attempts before giving up", 1, 5, 1),
             ParameterDef("look_retries", "int", 3, "Perception re-queries before declaring the block absent", 1, 10, 1),
+            ParameterDef("look_frames", "int", 3, "Frames averaged per look (√n noise reduction)", 1, 10, 1),
         ]
 
     def run(self, robot: Robot, world: World, p: dict, trace: Trace) -> PolicyResult:
         t0 = time.monotonic()
         robot.set_tool(1)
+        look = lambda: P.look_avg(world, trace, n=int(p["look_frames"]), retries=int(p["look_retries"]),
+                                  color=p["color"], label="block")
         try:
-            obj = P.look(world, trace, retries=int(p["look_retries"]), color=p["color"], label="block")
+            obj = look()
         except NotFound as e:
             return PolicyResult(ok=False, reason=str(e), attempts=0)
 
         attempts = 0
+        last_miss = ""
         while attempts < int(p["max_attempts"]):
             attempts += 1
-            # Grasp height: never below the clearance floor, never above the block top.
-            grasp_h = max(float(p["grasp_height_mm"]), world.min_clearance_mm)
-            top = obj.top_z - (world.table_z - robot.tool_length_mm)
-            grasp_h = min(grasp_h, max(top - 5.0, world.min_clearance_mm))
-
-            jaw_yaw = obj.short_axis_yaw()
+            try:
+                grasp_h = P.grasp_height(obj, world, robot, float(p["grasp_height_mm"]))
+                jaw_yaw, opening, clear = P.choose_grasp(obj, world.objects(), float(p["open_margin_mm"]))
+            except P.GraspInfeasible as e:
+                return PolicyResult(ok=False, reason=str(e), attempts=attempts - 1,
+                                    elapsed_s=time.monotonic() - t0)
             width = obj.width_across(jaw_yaw)
-            P.open_gripper(robot, trace, min(P.GRIPPER_STROKE_MM, width + float(p["open_margin_mm"])))
+            trace.log(f"grasp plan: yaw {jaw_yaw:.0f}° opening {opening:.0f} mm "
+                      f"(block {width:.0f} mm, neighbour clearance {clear:.0f} mm) at {grasp_h:.0f} mm")
+            P.open_gripper(robot, trace, opening)
             P.hover_above(robot, world, trace, obj.xy, float(p["approach_mm"]), jaw_yaw)
             P.descend_to(robot, world, trace, grasp_h)
             try:
                 jaw = P.grasp(robot, trace, width_hint_mm=width, force=int(p["force"]))
             except GraspMissed as e:
-                trace.log(f"attempt {attempts}: {e}")
+                why = P.explain_miss(obj, world, robot, grasp_h)
+                trace.log(f"attempt {attempts}: {e} — {why}")
+                last_miss = why
                 P.lift(robot, world, trace, float(p["approach_mm"]))
                 try:
-                    obj = P.look(world, trace, retries=int(p["look_retries"]), color=p["color"], label="block")
+                    obj = look()
                 except NotFound as e2:
                     return PolicyResult(ok=False, reason=f"lost target after miss: {e2}",
                                         attempts=attempts, elapsed_s=time.monotonic() - t0)
@@ -73,5 +81,5 @@ class PickColoredBlock(Policy):
                                 observations={"jaw_width_mm": round(jaw, 1), "object": obj.id},
                                 elapsed_s=time.monotonic() - t0)
 
-        return PolicyResult(ok=False, reason=f"grasp missed {attempts} times",
+        return PolicyResult(ok=False, reason=f"grasp missed {attempts} times: {last_miss}",
                             attempts=attempts, elapsed_s=time.monotonic() - t0)

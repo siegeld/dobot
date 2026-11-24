@@ -41,9 +41,16 @@ class PolicyRegistry:
                 log.warning("Failed to load policy module %s: %s", modname, e)
 
     def reload(self) -> None:
-        """Re-import policy modules so an edited file is picked up without a
-        server restart (the code tree is volume-mounted)."""
+        """Re-import the primitive library and the policy modules so an
+        edited file is picked up without a server restart (the code tree is
+        volume-mounted). Engine modules (types, guards, runner, sim/, real/)
+        are deliberately NOT reloaded — isinstance checks and live objects
+        depend on their identity — so an engine change needs a container
+        restart."""
+        import sys
         self._classes.clear()
+        if "dobot_ros.policies.primitives" in sys.modules:
+            importlib.reload(sys.modules["dobot_ros.policies.primitives"])
         package = importlib.import_module("dobot_ros.policies")
         for _, modname, _ in pkgutil.iter_modules(package.__path__):
             if modname.startswith("_") or modname in _SKIP:
