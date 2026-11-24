@@ -39,6 +39,17 @@ HTTP / WebSocket reference.
   the model when the robot is off.
 - **CLI** `dobot-ros policy list|scenes|run|batch`; `scripts/validate_fk.py`
   fits the Euler convention / flange yaw against the live arm.
+- **Deep simulation testing** (same day): sweeps of both policies × all scenes ×
+  three noise levels found and fixed: flat objects under the clearance floor
+  now fail fast with the reason instead of three blind attempts; stacking
+  re-observes the block in hand and the base right before placing and
+  releases 15 mm above the base; looks are frame-averaged (`look_avg`); the
+  jaw axis and opening are chosen for neighbour clearance (`choose_grasp`);
+  the simulator models the finger pads, so a wide jaw hitting a neighbour is
+  a Collision. `PolicyRegistry.reload()` refreshes primitives too (it did
+  not, which crashed edited policies on the live server). Real adapter
+  proven against a fake ROS client: MovL-only, preflight, confirm, watchdog,
+  caps.
 
 #### Vision pick — safety-gated, tool-aware, strategy-owned motion
 - **Pick-confirm broker** (`dobot_ros/web/pick_confirm.py`) — sync
