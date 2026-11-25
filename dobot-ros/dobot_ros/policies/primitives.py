@@ -213,6 +213,31 @@ def grasp_height(obj: WorldObject, world: World, robot: Robot, wanted_mm: float,
     return min(max(bottom + wanted_mm, floor), max(top - top_margin_mm, floor))
 
 
+def in_hand_offset(robot: Robot, world: World, trace: Trace, n: int, pick_yaw_deg: float,
+                   place_yaw_deg: float, **query: Any) -> List[float]:
+    """World-frame XY offset of the held object from the fingertip, expressed
+    at the *release* yaw, so a policy can place the block rather than the tool.
+
+    Measured by re-observing the object in the hand at the pick yaw; the
+    offset is rigid to the wrist, so it rotates by (place − pick) on the way
+    to the release pose. An implausible reading (> 30 mm) is ignored.
+    """
+    off = [0.0, 0.0]
+    try:
+        held = look_avg(world, trace, n=n, **query)
+        cur = robot.pose()
+        off = [held.position[0] - cur[0], held.position[1] - cur[1]]
+        if math.hypot(*off) > 30.0:
+            trace.log(f"in-hand offset ({off[0]:.0f}, {off[1]:.0f}) mm implausible, ignoring")
+            off = [0.0, 0.0]
+        else:
+            trace.log(f"in-hand offset ({off[0]:.1f}, {off[1]:.1f}) mm")
+    except NotFound:
+        trace.log("held object not visible; assuming centred")
+    d = math.radians(place_yaw_deg - pick_yaw_deg)
+    return [off[0] * math.cos(d) - off[1] * math.sin(d), off[0] * math.sin(d) + off[1] * math.cos(d)]
+
+
 def explain_miss(obj: WorldObject, world: World, robot: Robot, grasp_h: float) -> str:
     """Why a close-on-air probably happened, for the failure reason."""
     surface = world.table_z - robot.tool_length_mm

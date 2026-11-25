@@ -12,8 +12,7 @@ def runner(tmp_path):
 def test_registry_discovers_policy():
     reg = PolicyRegistry()
     assert "pick_colored_block" in reg.slugs()
-    meta = reg.list_policies()[0]
-    assert meta["slug"] == "pick_colored_block"
+    meta = next(m for m in reg.list_policies() if m["slug"] == "pick_colored_block")
     assert any(p["name"] == "color" for p in meta["parameters"])
     assert "class PickColoredBlock" in reg.source("pick_colored_block")
 

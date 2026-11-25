@@ -1,6 +1,6 @@
 # POLICIES — Hand-coded robot policies, tested in simulation
 
-> **Status (2026-11-24):** phases 0–3 and 5 built and deep-tested in simulation (72 offline tests; sweeps at three noise levels; UI run / batch / replay / stop verified in the browser). Not yet done on
+> **Status (2026-11-24):** phases 0–3 and 5 built and deep-tested in simulation (97 offline tests; five policies incl. sort, tower and line-up; sweeps at three noise levels; UI run / batch / replay / stop verified in the browser). Not yet done on
 > hardware: `scripts/validate_fk.py` against the live arm (pins the Euler convention and RZ
 > zero), and the first real `pick_colored_block` run (phase 4). The camera detection payload's
 > `color` field is still unverified; `real/world.py` names the colour from the frame if absent.

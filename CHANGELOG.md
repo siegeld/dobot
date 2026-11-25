@@ -68,6 +68,17 @@ HTTP / WebSocket reference.
   travel between pile and tower is at carry height; each placement is
   verified by re-observing the block, a fallen block is retried twice.
   `site_clear` / `boxes_clear` moved into primitives for both policies.
+- **`line_up_blocks` policy**: every block in one straight, evenly spaced
+  row along the near workspace edge, square to the row. Pitch is the
+  longest block side plus a gap; order is largest-first, grouped by
+  colour, or fewest-moves. A block squatting on a slot is moved to its
+  own slot or parked off the row first; a doubtful grip (top at the
+  clearance floor) is ranked last and the row is laid out to avoid it,
+  and shifts away from a block that proves immovable, so a failure never
+  leaves a gap. Placed blocks are re-checked with a longer look before
+  being re-moved. New primitive `in_hand_offset` (held-block offset
+  rotated to the release yaw) now used by all four pick-and-place
+  policies; the earlier ones applied the pick-yaw offset unrotated.
 
 #### Vision pick — safety-gated, tool-aware, strategy-owned motion
 - **Pick-confirm broker** (`dobot_ros/web/pick_confirm.py`) — sync

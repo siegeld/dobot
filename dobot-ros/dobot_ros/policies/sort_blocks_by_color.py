@@ -244,16 +244,7 @@ class SortBlocksByColor(Policy):
                 continue
             P.lift(robot, world, trace, float(p["carry_mm"]))
 
-            # in-hand offset → place the block, not the tool
-            off = [0.0, 0.0]
-            try:
-                held = P.look_avg(world, trace, n=n, id=obj.id)
-                cur = robot.pose()
-                off = [held.position[0] - cur[0], held.position[1] - cur[1]]
-                if math.hypot(*off) > 30.0:
-                    off = [0.0, 0.0]
-            except NotFound:
-                pass
+            off = P.in_hand_offset(robot, world, trace, n, jaw_yaw, PLACE_YAW, id=obj.id)
             target_xy = [slot[0] - off[0], slot[1] - off[1]]
             try:
                 P.place_at(robot, world, trace, target_xy, grasp_h + float(p["drop_mm"]),

@@ -140,7 +140,7 @@ The mode values from the feedback port (used in the web dashboard):
 
 Third control track beside vision picking and VLA — see **POLICIES.md** for the design.
 
-- **Policies** (`pick_colored_block`, `stack_colored_blocks`, `sort_blocks_by_color`, `stack_all_blocks`) are Python task programs in `dobot-ros/dobot_ros/policies/<slug>.py`
+- **Policies** (`pick_colored_block`, `stack_colored_blocks`, `sort_blocks_by_color`, `stack_all_blocks`, `line_up_blocks`) are Python task programs in `dobot-ros/dobot_ros/policies/<slug>.py`
   (class attrs `name/slug/description`, `parameter_defs()`, `run(robot, world, params, trace)`).
   They talk only to the `Robot` / `World` protocols (`policies/types.py`) through the
   primitives in `policies/primitives.py`, so the same file runs on the simulator

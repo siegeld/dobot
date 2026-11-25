@@ -89,22 +89,6 @@ class StackColoredBlocks(Policy):
 
         P.lift(robot, world, trace, float(p["carry_mm"]))
 
-        # In-hand re-observation: the block rarely sits dead-centre between the
-        # fingers (perception error at grasp time), so measure where it actually
-        # is relative to the fingertip and place the *block*, not the tool.
-        off = [0.0, 0.0]
-        try:
-            held = P.look_avg(world, trace, n=n, color=p["top_color"], label="block")
-            cur = robot.pose()
-            off = [held.position[0] - cur[0], held.position[1] - cur[1]]
-            if math.hypot(*off) > 30.0:   # implausible — ignore rather than trust
-                trace.log(f"in-hand offset {off} implausible, ignoring")
-                off = [0.0, 0.0]
-            else:
-                trace.log(f"in-hand offset ({off[0]:.1f}, {off[1]:.1f}) mm")
-        except NotFound:
-            trace.log("held block not visible; assuming centred")
-
         # Fresh, averaged look at the base right before placing.
         try:
             base = P.look_avg(world, trace, n=n, color=p["base_color"], label="block")
@@ -115,8 +99,11 @@ class StackColoredBlocks(Policy):
         # bottom lands drop_mm above the base's (noisy) top.
         base_top_h = base.top_z - surface
         release_h = base_top_h + float(p["drop_mm"]) + grasp_h
-        target_xy = [base.position[0] - off[0], base.position[1] - off[1]]
         place_yaw = base.yaw_deg + (jaw_yaw - top.yaw_deg)  # keep the same relative jaw/block alignment
+        # In-hand re-observation: the block rarely sits dead-centre between the
+        # fingers, so measure where it actually is and place the *block*, not the tool.
+        off = P.in_hand_offset(robot, world, trace, n, jaw_yaw, place_yaw, color=p["top_color"], label="block")
+        target_xy = [base.position[0] - off[0], base.position[1] - off[1]]
         P.place_at(robot, world, trace, target_xy, release_h, float(p["carry_mm"]), place_yaw)
 
         # Verify: the top block should now be reported above the base.

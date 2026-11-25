@@ -232,15 +232,7 @@ class StackAllBlocks(Policy):
             P.lift(robot, world, trace, float(p["approach_mm"]))
             return False, "miss: " + P.explain_miss(obj, world, robot, grasp_h)
         P.lift(robot, world, trace, carry_h)
-        off = [0.0, 0.0]
-        try:
-            held = P.look_avg(world, trace, n=n, id=obj.id)
-            cur = robot.pose()
-            off = [held.position[0] - cur[0], held.position[1] - cur[1]]
-            if math.hypot(*off) > 30.0:
-                off = [0.0, 0.0]
-        except NotFound:
-            pass
+        off = P.in_hand_offset(robot, world, trace, n, jaw_yaw, PLACE_YAW, id=obj.id)
         release_h = top_mm + float(p["drop_mm"]) + grasp_h
         try:
             P.place_at(robot, world, trace, [target_xy[0] - off[0], target_xy[1] - off[1]], release_h, carry_h,
