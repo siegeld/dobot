@@ -57,6 +57,10 @@
       <button class="btn btn-danger btn-sm estop-btn" id="btn-global-estop" title="Emergency stop — halts any active streaming and issues ros.stop()">
         <i class="bi bi-exclamation-octagon-fill"></i> E-STOP
       </button>
+      <span id="badge-user" class="small text-secondary" title="signed in"></span>
+      <button class="btn btn-outline-secondary btn-sm" id="btn-logout" title="Sign out of the dashboard">
+        <i class="bi bi-box-arrow-right"></i>
+      </button>
     </div>
   </div>
 </nav>
@@ -1044,7 +1048,7 @@
               const proto = location.protocol === 'https:' ? 'wss' : 'ws';
               const ws = new WebSocket(`${proto}://${location.host}/ws/spacemouse`);
               ws.onmessage = (ev) => { try { apply(JSON.parse(ev.data)); } catch (e) {} };
-              ws.onclose = () => setTimeout(connect, 2000);
+              ws.onclose = (ev) => { if (ev.code === 4401) { location.reload(); return; } setTimeout(connect, 2000); };
               ws.onerror = () => {};
             }
             connect();

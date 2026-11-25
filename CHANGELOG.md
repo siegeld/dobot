@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — sign-in for the dashboard (2026-11-25)
+
+- The web dashboard now requires a sign-in, the estate's standard way
+  (`homelab-system-ui` §7, the shared `homelab-auth` package): Active Directory,
+  Domain Admins only, with Kerberos browser single sign-on (a domain PC lands on the
+  dashboard signed in, no password) and a break-glass local `admin` from `.env`.
+  `web/auth.py` is the whole of it: an ASGI gate in front of every `/api` route and
+  both websockets (a websocket without a session is closed with code 4401 and the
+  page reloads into the login gate), the `/auth/login`, `/auth/sso`, `/auth/me`,
+  `/auth/logout` routes, and the `dobot_session` cookie. `static/login.html` tries the
+  domain ticket first and shows the form only when that fails. Public without a
+  session: `/auth/*`, `/static/*`, `/healthz` (new).
+- Estate side: the keytab is jupiter's host keytab (`HTTP/jupiter.siegel.com`, service
+  account `svc-http-jupiter`, cut for go2 the same day) copied to
+  `secrets/http-jupiter.keytab`; `SSO_KEYTAB`, `SESSION_SECRET`, `ADMIN_PASSWORD` and
+  the `AD_*` settings are in `.env` (`.env.example` documents them). The image gains
+  `krb5-user`, `libkrb5-dev`, `python3-dev`, `docker/krb5.conf` and the pinned
+  `homelab-auth[kerberos,fastapi]==1.4.0` wheel from `/share/src/homelab-auth/dist`
+  (compose `additional_contexts`). `AUTH_DISABLED=true` runs an open bench, logged
+  loudly; it is never the shipped configuration.
+- Tests: `tests/web/test_auth.py` (gate, pages, websocket 4401, admin login, SSO
+  404/401/200 semantics against a faked ticket, the reserved `admin` name).
+
 See `ARCHITECTURE.md` for the current system layout and `API.md` for the
 HTTP / WebSocket reference.
 

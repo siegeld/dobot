@@ -32,6 +32,7 @@ from dobot_ros.web.settings_store import (
 from dobot_ros.web.pick_confirm import (
     PickConfirmBroker, PickConfirmCancelled, PickConfirmTimeout,
 )
+from dobot_ros.web import auth as _auth
 
 
 # ── Global state ────────────────────────────────────────────────
@@ -241,6 +242,34 @@ async def lifespan(app: FastAPI):
 STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(title="Dobot CR5 Controller", lifespan=lifespan)
+
+# Sign-in (AD + Kerberos browser SSO + break-glass admin; homelab-auth). The gate is
+# outermost: every /api route and both websockets need the session cookie, the HTML
+# pages serve the login page without one. See web/auth.py.
+app.add_middleware(_auth.AuthGate)
+# uvicorn configures only its own loggers; without a root handler at INFO every
+# "sso refused: …" / "login: …" line is dropped, and a silent fall-back to the
+# password form cannot be diagnosed from the server (homelab-system-ui §7).
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+logging.getLogger("dobot.auth").setLevel(logging.INFO)
+app.include_router(_auth.router)
+if _auth.disabled():
+    logging.getLogger("dobot.auth").warning("AUTH_DISABLED=true: the dashboard is OPEN, no sign-in required")
+
+
+@app.get("/healthz")
+async def healthz():
+    """Liveness + what the deploy is (the homepage probes it)."""
+    try:
+        from importlib.metadata import version as _v
+        ver = _v("dobot-ros")
+    except Exception:  # noqa: BLE001
+        ver = "dev"
+    with _lock:
+        connected = bool(_state["connected"])
+    return {"status": "ok", "version": ver, "robot_connected": connected,
+            "auth": "off" if _auth.disabled() else "on", "sso": _auth.sso_configured()}
 
 
 # ── Models ──────────────────────────────────────────────────────

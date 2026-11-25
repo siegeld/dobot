@@ -11,6 +11,9 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+      additional_contexts:
+        # the homelab-auth wheel (sign-in), from NFS; see docker/Dockerfile
+        wheels: /share/src/homelab-auth/dist
     network_mode: host  # Required to reach robot on local network
     environment:
       - ROS_DOMAIN_ID=0
@@ -68,6 +71,19 @@ services:
     restart: unless-stopped
     environment:
       - IP_address=${ROBOT_IP:-192.168.5.1}
+      # Sign-in (see .env.example): AD login, Kerberos browser SSO, break-glass admin
+      - SESSION_SECRET=${SESSION_SECRET:?set SESSION_SECRET in .env (or AUTH_DISABLED=true)}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - AUTH_DISABLED=${AUTH_DISABLED:-false}
+      - AD_ENABLED=${AD_ENABLED:-true}
+      - AD_SERVER=${AD_SERVER:-ldap://dcrbr1.siegel.com}
+      - AD_BASE_DN=${AD_BASE_DN:-DC=siegel,DC=com}
+      - AD_DOMAIN=${AD_DOMAIN:-siegel.com}
+      - AD_ADMIN_GROUP=${AD_ADMIN_GROUP:-Domain Admins}
+      - SSO_KEYTAB=${SSO_KEYTAB:-}
+    volumes:
+      # Kerberos keytab for browser SSO (HTTP/jupiter.siegel.com). Gitignored.
+      - ./secrets:/app/secrets:ro
     command: dobot-ros web --port 7070
     ports:
       - "7070:7070"

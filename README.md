@@ -314,7 +314,7 @@ docker compose build
 ./startup.sh
 ```
 
-The driver auto-connects when the robot powers on and auto-reconnects if the robot reboots. The web dashboard is available at http://localhost:7070 and works independently — it shows a disconnected state until the driver connects.
+The driver auto-connects when the robot powers on and auto-reconnects if the robot reboots. The web dashboard is served at https://jupiter.siegel.com/dobot/ (the container listens on 7070 behind jupiter's nginx) and works independently — it shows a disconnected state until the driver connects. It requires a sign-in: Active Directory, Domain Admins only, with Kerberos browser SSO on a domain PC, and a break-glass local `admin` from `.env` (see `API.md` → Authentication and `.env.example`).
 
 ```bash
 # CLI commands (while system is running)

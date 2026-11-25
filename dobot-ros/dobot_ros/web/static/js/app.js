@@ -132,7 +132,8 @@
       } catch (e) { /* ignore parse errors */ }
     };
 
-    state.ws.onclose = () => {
+    state.ws.onclose = (ev) => {
+      if (ev.code === 4401) { location.reload(); return; }  // session gone: back to the login gate
       updateConnectionBadge(false);
       setTimeout(connectWebSocket, Math.min(state.wsRetryDelay, 10000));
       state.wsRetryDelay *= 1.5;
@@ -1028,6 +1029,18 @@
 
     // Start WebSocket
     connectWebSocket();
+
+    // Who is signed in, and the way out. Sign-out sets the session-scoped skip so
+    // the login page does not sign the same person straight back in via SSO.
+    fetch('/auth/me', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null).then(me => {
+      const el = document.getElementById('badge-user');
+      if (el && me) el.textContent = me.name;
+    }).catch(() => {});
+    const logoutBtn = document.getElementById('btn-logout');
+    if (logoutBtn) logoutBtn.addEventListener('click', () => {
+      try { sessionStorage.setItem('dobot_sso_skip', '1'); } catch (e) {}
+      fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }).finally(() => location.reload());
+    });
 
     // Poll status every 5s for uptime etc
     setInterval(pollStatus, 5000);

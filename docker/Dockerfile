@@ -11,7 +11,10 @@ RUN apt-get update && apt-get install -y \
     ros-jazzy-xacro \
     ros-jazzy-robot-state-publisher \
     ros-jazzy-joint-state-publisher \
+    krb5-user libkrb5-dev python3-dev \
     && rm -rf /var/lib/apt/lists/*
+# Not the host's krb5.conf: that one uses a KEYRING ccache a container cannot have.
+COPY docker/krb5.conf /etc/krb5.conf
 
 # Create workspace
 WORKDIR /ros2_ws
@@ -33,7 +36,15 @@ RUN . /opt/ros/jazzy/setup.sh && \
 # At runtime, PYTHONPATH is set so the volume-mounted source takes
 # precedence — code changes work without rebuild.
 COPY dobot-ros /dobot-ros-pkg
-RUN pip3 install --break-system-packages /dobot-ros-pkg requests Pillow python-multipart
+# Sign-in is the shared homelab-auth package, installed as a pinned wheel from NFS
+# (compose additional_contexts → the `wheels` build context), never from the network.
+# [kerberos] builds gssapi against libkrb5 (no wheel for this Python), hence the dev
+# packages above; krb5-user stays for the runtime libraries and klist.
+COPY --from=wheels homelab_auth-*.whl /tmp/wheels/
+RUN pip3 install --break-system-packages --find-links /tmp/wheels \
+      /dobot-ros-pkg requests Pillow python-multipart \
+      "homelab-auth[kerberos,fastapi]==1.4.0" "itsdangerous>=2.2,<3" \
+    && rm -rf /tmp/wheels
 
 # Source workspace on shell entry
 RUN echo "source /ros2_ws/install/setup.bash" >> /root/.bashrc

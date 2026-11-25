@@ -52,6 +52,8 @@ dmypy.json
 # Local config (user-specific)
 dobot_config.local.yaml
 .env
+# keytabs and other secrets mounted into containers
+secrets/
 
 # History files
 .dobot_history

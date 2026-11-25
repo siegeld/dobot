@@ -72,7 +72,8 @@
       } catch (e) { /* ignore */ }
     };
 
-    state.ws.onclose = () => {
+    state.ws.onclose = (ev) => {
+      if (ev.code === 4401) { location.reload(); return; }  // session gone: back to the login gate
       updateConnectionBadge(false);
       setTimeout(connectWebSocket, Math.min(state.wsRetryDelay, 10000));
       state.wsRetryDelay *= 1.5;

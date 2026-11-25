@@ -1,5 +1,24 @@
 # API Reference
 
+## Authentication
+
+Every `/api/*` route and both websockets need the `dobot_session` cookie (HttpOnly,
+Secure, SameSite=Lax), minted by:
+
+- `POST /auth/login` — `{"account", "password", "remember"}`; Active Directory, Domain
+  Admins only (403 otherwise), or the break-glass local `admin`. 401 on a bad password,
+  429 after ten failures in ten minutes per account or address.
+- `GET /auth/sso` — Kerberos browser single sign-on (Negotiate). 404 when `SSO_KEYTAB`
+  is not set, 401 + `WWW-Authenticate: Negotiate` with no ticket, 401 without a
+  challenge for a refused ticket, 200 + cookie for a domain admin.
+- `GET /auth/me` — `{"name", "email", "role"}` for the current session (401 if none).
+- `POST /auth/logout` — clears the cookie.
+
+Without a session: `/api/*` answers 401 `{"detail": "not authenticated"}`; `/ws/state`
+and `/ws/spacemouse` are accepted and immediately closed with code **4401**; `/`,
+`/pendant` and `/spacemouse` serve the login page. `/static/*`, `/auth/*` and
+`GET /healthz` (`{"status", "version", "robot_connected", "auth", "sso"}`) are public.
+
 HTTP + WebSocket surface of the Dobot CR5 web dashboard. Served by
 `dobot-ros/dobot_ros/web/server.py`.
 

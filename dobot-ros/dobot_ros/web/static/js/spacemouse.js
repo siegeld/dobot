@@ -32,7 +32,7 @@
     ws.onmessage = (ev) => {
       try { render(JSON.parse(ev.data)); } catch (e) { console.error(e); }
     };
-    ws.onclose = () => setTimeout(connectWs, 1000);
+    ws.onclose = (ev) => { if (ev.code === 4401) { location.reload(); return; } setTimeout(connectWs, 1000); };
     ws.onerror = () => {};
   }
 

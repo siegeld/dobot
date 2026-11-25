@@ -47,6 +47,7 @@ The active development focus is the ROS2 path.
 - `dobot-ros/dobot_ros/shell.py` — interactive shell (REPL)
 - `dobot-ros/dobot_ros/cli.py` — click-based CLI commands
 - `dobot-ros/dobot_ros/web/` — FastAPI web dashboard (WebSocket state push at 5Hz)
+- `dobot-ros/dobot_ros/web/auth.py` — the sign-in gate (AD + Kerberos SSO via the shared `homelab-auth` package; break-glass `admin`). Needs `SESSION_SECRET` in `.env`; the keytab in `secrets/` is gitignored and never committed. Tests: `tests/web/`, run in the image (see the docstring there).
 
 ## Gripper
 
